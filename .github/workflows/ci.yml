@@ -18,4 +18,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
+      - name: Sandbox self-test
+        run: npm run test:sandbox
+      - name: Verify every level (buggy fails, fix passes)
+        run: npm run verify
       - run: npm run build
