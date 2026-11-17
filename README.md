@@ -18,7 +18,12 @@ Every level must fail on the buggy code and pass with the reference fix (visible
 npm run verify            # all levels
 npm run verify -- m3 -v   # one level, every test
 npm run test:sandbox      # checks the in-browser Node sandbox itself
+npm run check:leaks       # after a build: no answer is readable in dist/
 ```
+
+## How answers are kept out of sight
+
+Hidden tests, fixes, hints and answer text are scrambled into a separate small file per level. The site fetches that file only when you press Submit or open Hints or Answers. So you can't find an answer by searching the site's code. This stops casual peeking, not a determined cheater. The repo itself must stay private.
 
 ## Layout
 

@@ -23,3 +23,5 @@ jobs:
       - name: Verify every level (buggy fails, fix passes)
         run: npm run verify
       - run: npm run build
+      - name: Check no answers are readable in the build
+        run: npm run check:leaks
