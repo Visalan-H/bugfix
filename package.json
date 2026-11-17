@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "tsx scripts/verify-levels.ts"
+    "verify": "tsx scripts/verify-levels.ts",
+    "test:sandbox": "tsx scripts/sandbox-selftest.ts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
