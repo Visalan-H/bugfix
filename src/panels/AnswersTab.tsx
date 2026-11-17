@@ -3,7 +3,6 @@ import { useSecrets } from '../levels/useSecrets';
 import { updateLevel } from '../state/store';
 import { Diff } from '../ui/Diff';
 import { fmtTime } from '../ui/format';
-import { toast } from '../ui/toast';
 import { Inline } from './Html';
 
 export function AnswersTab({ level, progress, loadFix }: PanelProps) {
@@ -73,13 +72,7 @@ export function AnswersTab({ level, progress, loadFix }: PanelProps) {
           <Diff from={level.files[p] ?? ''} to={secrets.solution[p]} />
         </div>
       ))}
-      <button
-        className="btn sm"
-        onClick={() => {
-          loadFix(secrets.solution);
-          toast('Fix loaded. Run the tests.');
-        }}
-      >
+      <button className="btn sm" onClick={() => loadFix(secrets.solution)}>
         Load the fix into the editor
       </button>
     </>

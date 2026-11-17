@@ -21,7 +21,17 @@ const pieces = (text: string) => text.match(/[A-Za-z0-9 _.,:;=()<>+\-*!?{}[\]]{2
 
 const levels = readLevels().map((x) => x.level);
 // Text anyone may see. Shared lines like `expect(res.status).toBe(400);` are not leaks.
-const pub = levels.flatMap((L) => [JSON.stringify(splitLevel(L).meta), L.ticket, ...Object.values(L.files)]).join('\n');
+// The Guide teaches the common bugs with bad/good code on purpose, so it counts as public too.
+const guide = readFileSync(join(import.meta.dirname, '..', 'src', 'pages', 'guide-content.html'), 'utf8')
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"')
+  .replace(/&#39;/g, "'")
+  .replace(/&amp;/g, '&');
+const pub = [
+  guide,
+  ...levels.flatMap((L) => [JSON.stringify(splitLevel(L).meta), L.ticket, ...Object.values(L.files)]),
+].join('\n');
 
 let leaks = 0;
 for (const level of levels) {
