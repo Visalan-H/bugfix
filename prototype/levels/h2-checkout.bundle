@@ -1,0 +1,363 @@
+@@@ meta.json
+{
+  "id": "h2",
+  "difficulty": "hard",
+  "title": "Checkout: overselling, money & retries",
+  "minutes": 45,
+  "tagline": "The 'why didn't the request commit correctly' family: races, partial writes, rounding, idempotency.",
+  "tags": ["race conditions", "atomic updates", "rollback", "money", "idempotency"],
+  "lookFor": [
+    "Read → check → write in separate awaits is a race. Two requests can both read stock=1. Look for an atomic helper in the repo; there often is one nobody uses.",
+    "Any loop that writes per item and can throw halfway leaves partial state. Validate everything first, then write, and undo on failure.",
+    "Money: round once, at the end. `Math.round(x * 100) / 100`. Check where the parentheses are.",
+    "HTTP headers are case-insensitive. `req.headers` keys are lower-case, `req.get()` is case-insensitive. Mixing them is a bug.",
+    "Idempotency stores need a guard for 'no key provided', or every keyless request matches the `undefined` entry."
+  ],
+  "bugs": [
+    {
+      "symptom": "Total is 70 instead of 69.97",
+      "file": "src/services/orderService.js",
+      "hints": [
+        "What is `total * 100 / 100`? Where should Math.round sit?"
+      ],
+      "cause": "`Math.round(total * 100 / 100)` is just `Math.round(total)`, which rounds to whole rupees. The `/ 100` has to go outside the round.",
+      "fix": "`total: Math.round(total * 100) / 100`",
+      "pattern": "Misplaced parentheses in rounding"
+    },
+    {
+      "symptom": "A failed order still reduces stock",
+      "file": "src/services/orderService.js",
+      "hints": [
+        "Order [Echo x1, Cable x5]. Which line runs for the Echo before the Cable check fails?",
+        "Two phases: validate all lines, then reserve. If reserving fails halfway, put back what you took."
+      ],
+      "cause": "Stock is decremented inside the same loop that validates. When item 2 fails, item 1 has already been written, so the order is half-applied with no rollback.",
+      "fix": "Validate every line first (product exists, qty valid). Then reserve each line; on any failure, `increment` the ones already reserved and rethrow.",
+      "pattern": "Partial write without rollback"
+    },
+    {
+      "symptom": "Two buyers both get the last Kindle",
+      "file": "src/services/orderService.js",
+      "hints": [
+        "Both requests run `findById` before either runs `setStock`. Both see stock = 1.",
+        "productRepo already has `decrementIfAvailable`. What makes it different?"
+      ],
+      "cause": "Read-modify-write across awaits: check `product.stock < qty`, then `setStock(stock - qty)`. Concurrent requests interleave between the read and the write and both succeed (lost update).",
+      "fix": "Use the atomic conditional update: `findOneAndUpdate({ _id, stock: { $gte: qty } }, { $inc: { stock: -qty } })`, already wrapped as `productRepo.decrementIfAvailable`. A null result means out of stock → 409.",
+      "pattern": "Check-then-act race → atomic conditional update"
+    },
+    {
+      "symptom": "Retrying with the same Idempotency-Key charges twice",
+      "file": "src/controllers/orderController.js",
+      "hints": [
+        "Log the key that gets stored and the key that gets looked up.",
+        "`req.headers['Idempotency-Key']` vs `req.get('Idempotency-Key')`"
+      ],
+      "cause": "The lookup uses `req.get()` (case-insensitive) but the store uses `req.headers['Idempotency-Key']`. Node lower-cases header names, so it stores under `undefined`. (Hidden) That `undefined` entry then makes every keyless request return the first order.",
+      "fix": "`const key = req.get('Idempotency-Key');` used for both, guarded with `if (key && ...)` / `if (key) idempotency.set(key, order._id)`.",
+      "pattern": "Header case + undefined map key"
+    }
+  ]
+}
+@@@ ticket.md
+# PAY-1337: Oversold inventory & double charges
+
+Finance found **orders for stock we didn't have**, **customers charged twice** after a network retry, and **totals that are off by paise**.
+
+## Rules
+* `POST /orders` `{ items: [{ productId, qty }] }`, header `x-user-id`.
+* All-or-nothing: if any line fails (unknown product **404**, bad qty **400**, not enough stock **409**), **no stock changes**.
+* Never sell more than `stock`, even with concurrent requests.
+* `total` = Σ price × qty, rounded to 2 decimals.
+* Optional `Idempotency-Key` header (a unique id the app sends so retries are safe): a retry with the same key returns the **same order** (**200**) and doesn't touch stock. Without a key, every request is a new order (**201**).
+* `GET /products/:id` → product with current `stock`.
+
+## Seed stock
+`p-echo` Echo Dot ₹49.99 × 5 · `p-cable` USB-C Cable ₹9.99 × 2 · `p-kindle` Kindle ₹139.99 × 1
+@@@ repo/package.json
+{
+  "name": "checkout-service",
+  "version": "3.0.2",
+  "scripts": { "test": "jest" },
+  "dependencies": { "express": "^5.0.0", "memdb": "1.0.0" },
+  "devDependencies": { "jest": "^29.0.0", "supertest": "^7.0.0" }
+}
+@@@ repo/README.md
+# checkout-service
+
+`memdb.findOneAndUpdate(filter, update)` is **atomic**: the match and the update happen in one step, like MongoDB.
+Every other pair of calls (read, then write) is NOT atomic. Other requests can run between them.
+@@@ repo/src/app.js
+const express = require('express');
+const auth = require('./middleware/auth');
+const errorHandler = require('./middleware/errorHandler');
+const orderController = require('./controllers/orderController');
+const productController = require('./controllers/productController');
+
+const app = express();
+app.use(express.json());
+app.use(auth);
+app.get('/products/:id', productController.get);
+app.post('/orders', orderController.create);
+app.use(errorHandler);
+
+module.exports = app;
+@@@ repo/src/errors.js
+class AppError extends Error {
+  constructor(message, status) { super(message); this.name = this.constructor.name; this.status = status; }
+}
+class ValidationError extends AppError { constructor(m) { super(m, 400); } }
+class NotFoundError extends AppError { constructor(w = 'Resource') { super(`${w} not found`, 404); } }
+class ConflictError extends AppError { constructor(m) { super(m, 409); } }
+
+module.exports = { AppError, ValidationError, NotFoundError, ConflictError };
+@@@ repo/src/middleware/auth.js
+module.exports = function auth(req, res, next) {
+  const id = req.get('x-user-id');
+  if (!id) return res.status(401).json({ error: 'unauthenticated' });
+  req.user = { id };
+  next();
+};
+@@@ repo/src/middleware/errorHandler.js
+module.exports = function errorHandler(err, req, res, next) {
+  const status = err.status || 500;
+  if (status === 500) console.error(err);
+  res.status(status).json({ error: err.message });
+};
+@@@ repo/src/controllers/productController.js
+const productRepo = require('../repositories/productRepo');
+const { NotFoundError } = require('../errors');
+
+exports.get = async (req, res) => {
+  const p = await productRepo.findById(req.params.id);
+  if (!p) throw new NotFoundError('Product');
+  res.json(p);
+};
+@@@ repo/src/controllers/orderController.js
+const orderService = require('../services/orderService');
+const orderRepo = require('../repositories/orderRepo');
+
+// key -> orderId. (Would be Redis with a TTL in prod.)
+const idempotency = new Map();
+
+exports.create = async (req, res) => {
+  const key = req.get('Idempotency-Key');
+  if (idempotency.has(key)) {
+    const existing = await orderRepo.findById(idempotency.get(key));
+    return res.status(200).json(existing);
+  }
+
+  const order = await orderService.placeOrder(req.user.id, req.body.items);
+  idempotency.set(req.headers['Idempotency-Key'], order._id);
+  res.status(201).json(order);
+};
+@@@ repo/src/services/orderService.js
+const productRepo = require('../repositories/productRepo');
+const orderRepo = require('../repositories/orderRepo');
+const { ValidationError, NotFoundError, ConflictError } = require('../errors');
+
+async function placeOrder(userId, items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new ValidationError('items must be a non-empty array');
+  }
+
+  let total = 0;
+  const lines = [];
+
+  for (const { productId, qty } of items) {
+    if (!Number.isInteger(qty) || qty <= 0) throw new ValidationError('qty must be a positive integer');
+
+    const product = await productRepo.findById(productId);
+    if (!product) throw new NotFoundError('Product');
+    if (product.stock < qty) throw new ConflictError(`${product.name} is out of stock`);
+
+    await productRepo.setStock(productId, product.stock - qty);
+
+    total += product.price * qty;
+    lines.push({ productId, name: product.name, price: product.price, qty });
+  }
+
+  return orderRepo.create({ userId, lines, total: Math.round(total * 100 / 100), status: 'placed' });
+}
+
+module.exports = { placeOrder };
+@@@ repo/src/repositories/productRepo.js
+const db = require('memdb');
+const products = db.collection('products');
+
+const ready = Promise.all([
+  products.insert({ _id: 'p-echo', name: 'Echo Dot', price: 49.99, stock: 5 }),
+  products.insert({ _id: 'p-cable', name: 'USB-C Cable', price: 9.99, stock: 2 }),
+  products.insert({ _id: 'p-kindle', name: 'Kindle', price: 139.99, stock: 1 }),
+]);
+
+exports.findById = async (id) => { await ready; return products.findById(id); };
+
+exports.setStock = async (id, stock) => { await ready; return products.updateById(id, { stock }); };
+
+// Atomic: only decrements if enough stock. Returns the updated product, or null.
+exports.decrementIfAvailable = async (id, qty) => {
+  await ready;
+  return products.findOneAndUpdate({ _id: id, stock: { $gte: qty } }, { $inc: { stock: -qty } });
+};
+
+exports.increment = async (id, qty) => {
+  await ready;
+  return products.findOneAndUpdate({ _id: id }, { $inc: { stock: qty } });
+};
+@@@ repo/src/repositories/orderRepo.js
+const db = require('memdb');
+const orders = db.collection('orders');
+
+exports.create = (doc) => orders.insert({ ...doc, createdAt: Date.now() });
+exports.findById = (id) => orders.findById(id);
+@@@ repo/tests/orders.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const order = (items, key) => {
+  const r = request(app).post('/orders').set('x-user-id', 'u1');
+  if (key) r.set('Idempotency-Key', key);
+  return r.send({ items });
+};
+const stock = async (id) => (await request(app).get(`/products/${id}`).set('x-user-id', 'u1')).body.stock;
+
+describe('Checkout', () => {
+  test('total is rounded to 2 decimals and stock goes down', async () => {
+    const res = await order([{ productId: 'p-echo', qty: 1 }, { productId: 'p-cable', qty: 2 }]);
+    expect(res.status).toBe(201);
+    expect(res.body.total).toBe(69.97);
+    expect(await stock('p-echo')).toBe(4);
+    expect(await stock('p-cable')).toBe(0);
+  });
+
+  test('a failed order does not change any stock', async () => {
+    const res = await order([{ productId: 'p-echo', qty: 1 }, { productId: 'p-cable', qty: 5 }]);
+    expect(res.status).toBe(409);
+    expect(await stock('p-echo')).toBe(5);
+    expect(await stock('p-cable')).toBe(2);
+  });
+
+  test('two concurrent buyers cannot both get the last Kindle', async () => {
+    const [a, b] = await Promise.all([
+      order([{ productId: 'p-kindle', qty: 1 }]),
+      order([{ productId: 'p-kindle', qty: 1 }]),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([201, 409]);
+    expect(await stock('p-kindle')).toBe(0);
+  });
+
+  test('retry with the same Idempotency-Key returns the same order once', async () => {
+    const first = await order([{ productId: 'p-echo', qty: 2 }], 'key-123');
+    const retry = await order([{ productId: 'p-echo', qty: 2 }], 'key-123');
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(200);
+    expect(retry.body._id).toBe(first.body._id);
+    expect(await stock('p-echo')).toBe(3);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const order = (items, key) => {
+  const r = request(app).post('/orders').set('x-user-id', 'u1');
+  if (key) r.set('Idempotency-Key', key);
+  return r.send({ items });
+};
+const stock = async (id) => (await request(app).get(`/products/${id}`).set('x-user-id', 'u1')).body.stock;
+
+describe('hidden', () => {
+  test('orders without a key are always new orders', async () => {
+    const a = await order([{ productId: 'p-echo', qty: 1 }]);
+    const b = await order([{ productId: 'p-echo', qty: 1 }]);
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    expect(a.body._id).not.toBe(b.body._id);
+    expect(await stock('p-echo')).toBe(3);
+  });
+
+  test('different keys are different orders', async () => {
+    const a = await order([{ productId: 'p-echo', qty: 1 }], 'k1');
+    const b = await order([{ productId: 'p-echo', qty: 1 }], 'k2');
+    expect(a.body._id).not.toBe(b.body._id);
+  });
+
+  test('bad qty on the 2nd line → 400 and no stock change', async () => {
+    const res = await order([{ productId: 'p-echo', qty: 1 }, { productId: 'p-cable', qty: 0 }]);
+    expect(res.status).toBe(400);
+    expect(await stock('p-echo')).toBe(5);
+  });
+
+  test('unknown product on the 2nd line → 404 and no stock change', async () => {
+    const res = await order([{ productId: 'p-echo', qty: 2 }, { productId: 'nope', qty: 1 }]);
+    expect(res.status).toBe(404);
+    expect(await stock('p-echo')).toBe(5);
+  });
+
+  test('3 concurrent orders of 2 Echo Dots with stock 5 → exactly 2 succeed', async () => {
+    const rs = await Promise.all([1, 2, 3].map(() => order([{ productId: 'p-echo', qty: 2 }])));
+    expect(rs.filter((r) => r.status === 201)).toHaveLength(2);
+    expect(await stock('p-echo')).toBe(1);
+  });
+
+  test('empty items → 400', async () => {
+    const res = await order([]);
+    expect(res.status).toBe(400);
+  });
+});
+@@@ solution/src/controllers/orderController.js
+const orderService = require('../services/orderService');
+const orderRepo = require('../repositories/orderRepo');
+
+// key -> orderId. (Would be Redis with a TTL in prod.)
+const idempotency = new Map();
+
+exports.create = async (req, res) => {
+  const key = req.get('Idempotency-Key');
+  if (key && idempotency.has(key)) {
+    const existing = await orderRepo.findById(idempotency.get(key));
+    return res.status(200).json(existing);
+  }
+
+  const order = await orderService.placeOrder(req.user.id, req.body.items);
+  if (key) idempotency.set(key, order._id);
+  res.status(201).json(order);
+};
+@@@ solution/src/services/orderService.js
+const productRepo = require('../repositories/productRepo');
+const orderRepo = require('../repositories/orderRepo');
+const { ValidationError, NotFoundError, ConflictError } = require('../errors');
+
+async function placeOrder(userId, items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new ValidationError('items must be a non-empty array');
+  }
+
+  // Phase 1: validate everything before touching stock.
+  const lines = [];
+  for (const { productId, qty } of items) {
+    if (!Number.isInteger(qty) || qty <= 0) throw new ValidationError('qty must be a positive integer');
+    const product = await productRepo.findById(productId);
+    if (!product) throw new NotFoundError('Product');
+    lines.push({ productId, name: product.name, price: product.price, qty });
+  }
+
+  // Phase 2: reserve atomically; undo on any failure.
+  const reserved = [];
+  try {
+    for (const line of lines) {
+      const ok = await productRepo.decrementIfAvailable(line.productId, line.qty);
+      if (!ok) throw new ConflictError(`${line.name} is out of stock`);
+      reserved.push(line);
+    }
+  } catch (err) {
+    for (const line of reserved) await productRepo.increment(line.productId, line.qty);
+    throw err;
+  }
+
+  const total = lines.reduce((sum, l) => sum + l.price * l.qty, 0);
+  return orderRepo.create({ userId, lines, total: Math.round(total * 100) / 100, status: 'placed' });
+}
+
+module.exports = { placeOrder };

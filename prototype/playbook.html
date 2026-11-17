@@ -1,0 +1,260 @@
+<div class="eyebrow">Playbook</div>
+<h1>How to pass the bug-fixing round</h1>
+<p class="lead">This page is built from real reports by people who took the Amazon test. Sources are at the bottom. Read it once (about 8 minutes), then practise on the levels.</p>
+<div class="toc">
+  <a href="#playbook" data-sec="pb-format">1 · What it is</a>
+  <a href="#playbook" data-sec="pb-plan">2 · 60-minute plan</a>
+  <a href="#playbook" data-sec="pb-loop">3 · Fixing one bug</a>
+  <a href="#playbook" data-sec="pb-recon">4 · Reading new code fast</a>
+  <a href="#playbook" data-sec="pb-patterns">5 · Common bugs</a>
+  <a href="#playbook" data-sec="pb-hidden">6 · Hidden tests</a>
+  <a href="#playbook" data-sec="pb-ai">7 · Using the AI</a>
+  <a href="#playbook" data-sec="pb-spring">8 · Spring Boot</a>
+  <a href="#playbook" data-sec="pb-sources">Sources</a>
+</div>
+
+<h2 id="pb-format"><span class="n">01</span>What the round is</h2>
+<ul>
+  <li>The Amazon online test has a coding part with <b>two questions</b>: a normal coding puzzle, and a <b>bug-fixing task</b> in an app someone else wrote.</li>
+  <li>You <b>pick the language</b>. People report Node (MERN), Spring Boot and Django.</li>
+  <li><b>The time varies.</b> A common report: 40 minutes for the puzzle and 60 for the bug task. Your invite email has the real numbers.</li>
+  <li><b>The number of bugs varies</b>, from 3 bugs to about 6 failing tests. Apps people got: car rental, support tickets, movie search, password reset.</li>
+  <li>There's an <b>AI helper</b> built in. The test is watched (camera on), and you're responsible for every line you submit.</li>
+  <li>There are <b>hidden tests</b> you can't see. They check things like empty input, limits, saving, permissions and repeated actions.</li>
+</ul>
+<div class="callout"><b>What they really want to see:</b> you can open code you've never seen, find what's wrong, prove it, and make a small, safe fix without breaking anything else.</div>
+
+<h2 id="pb-plan"><span class="n">02</span>The 60-minute plan</h2>
+<div class="timeline">
+  <div style="flex:8;background:#6cb6ff"><b>0–8</b><span>Look around</span></div>
+  <div style="flex:40;background:#ffbf47"><b>8–48</b><span>Fix bugs, about 10 min each, easiest first</span></div>
+  <div style="flex:7;background:#3ddc97"><b>48–55</b><span>Hidden-test check</span></div>
+  <div style="flex:5;background:#c39bff"><b>55–60</b><span>Review changes</span></div>
+</div>
+<ul>
+  <li><b>Run the tests before you read any code.</b> The names of the failing tests are your to-do list.</li>
+  <li><b>Fix the easiest one first.</b> An early win calms you down, and one fix (like the error handler) often fixes several tests.</li>
+  <li><b>Give each bug about 10 minutes.</b> If you're stuck, write down your guess and move on. The bugs are usually separate.</li>
+  <li><b>Change one thing, then run ALL the tests.</b> Never stack three guesses on top of each other.</li>
+  <li><b>Save the last 10 minutes</b> for the hidden-test list below and a final look at your changes.</li>
+</ul>
+
+<h2 id="pb-loop"><span class="n">03</span>How to fix one bug</h2>
+<div class="loop">
+  <div><b><i>1</i>Read the failure</b>"Expected X, got Y" is your clue. 500 = something crashed. Empty = something wasn't awaited. Wrong data = wrong logic.</div>
+  <div><b><i>2</i>Follow the request</b>Route → controller → service → database. Write down the path.</div>
+  <div><b><i>3</i>Guess</b>Say it in one sentence: "The id is undefined because the route calls it ticketId."</div>
+  <div><b><i>4</i>Prove it</b>Add one <code>console.log</code> where you think it breaks. Run again. Don't fix what you haven't proved.</div>
+  <div><b><i>5</i>Small fix</b>Change as little as possible. Run all the tests. Remove the log.</div>
+</div>
+<div class="callout"><b>What the failure tells you:</b><br>
+<code>{}</code> or <code>[{},{}]</code> → a missing <code>await</code> or <code>Promise.all</code><br>
+<code>500</code> → something crashed, or the error handler reads the wrong field<br>
+<code>ERR_HTTP_HEADERS_SENT</code> → a missing <code>return</code> after sending a reply<br>
+too much data → a filter is <code>undefined</code>, or there's no owner check<br>
+right reply, but wrong when you load it again → it wasn't saved, or an old cached copy was served<br>
+works alone, fails when two requests run at once → two requests clashing</div>
+
+<h2 id="pb-recon"><span class="n">04</span>Reading new code in 5 minutes</h2>
+<ol>
+  <li><b>README and package.json:</b> how to run the tests, and which libraries are used.</li>
+  <li><b>app.js:</b> the order of middleware, where routes are attached, and whether there's an error handler.</li>
+  <li><b>Routes file:</b> the list of endpoints. Note every <code>:name</code> in the paths.</li>
+  <li><b>The test file:</b> how tests log in (headers? tokens?) and what they expect back.</li>
+  <li><b>Models, errors, constants:</b> field names, status names, error codes.</li>
+</ol>
+<p>Skip any file that no failing test touches. Your job is fixing bugs, not tidying code.</p>
+
+<h2 id="pb-patterns"><span class="n">05</span>Common bugs (Node / Express / Mongo)</h2>
+<p class="muted">Almost every planted bug is one of these. Learn to spot them on sight. Red is the bug, green is the fix.</p>
+<div class="patterns">
+  <div class="pat"><h4>Missing <code>await</code></h4><p class="why">The reply is <code>{}</code>, or the data shows up "later".</p>
+<pre class="bad">const todo = repo.create(data);
+res.json(todo); // {}</pre><pre class="good">const todo = await repo.create(data);</pre></div>
+
+  <div class="pat"><h4>Missing <code>return</code> after a reply</h4><p class="why">The function keeps running after sending a reply.</p>
+<pre class="bad">if (!title) res.status(400).json(err);
+await repo.create(...)</pre><pre class="good">if (!title) return res.status(400).json(err);</pre></div>
+
+  <div class="pat"><h4><code>async</code> map without <code>Promise.all</code></h4><p class="why">You get a list of <code>{}</code>.</p>
+<pre class="bad">return list.map(async t => ({...t, n: await count(t)}));</pre><pre class="good">return Promise.all(list.map(async t => ...));</pre></div>
+
+  <div class="pat"><h4>URL values are text</h4><p class="why">They don't match true/false or numbers, and <code>+</code> glues them together.</p>
+<pre class="bad">filter.done = req.query.done;     // 'true'
+skip + req.query.limit            // '22'</pre><pre class="good">filter.done = req.query.done === 'true';
+const limit = Number(req.query.limit) || 10;</pre></div>
+
+  <div class="pat"><h4>Wrong route name</h4><p class="why">The value is <code>undefined</code>, so you get "not found".</p>
+<pre class="bad">router.post('/:ticketId/replies', ...)
+req.params.id</pre><pre class="good">req.params.ticketId</pre></div>
+
+  <div class="pat"><h4><code>undefined</code> in a filter → returns everything</h4><p class="why"><code>{owner: undefined}</code> becomes <code>{}</code>, so everyone's data leaks.</p>
+<pre class="bad">find({ owner: req.user.userId }) // field doesn't exist</pre><pre class="good">find({ owner: req.user.id })</pre></div>
+
+  <div class="pat"><h4>No owner check</h4><p class="why">The list is filtered, but <code>/:id</code> routes aren't.</p>
+<pre class="bad">const car = await Car.findById(id);</pre><pre class="good">const car = await Car.findOne({ _id: id, owner: user.id });
+if (!car) return 404;</pre></div>
+
+  <div class="pat"><h4>Changed but not saved</h4><p class="why">The reply looks right. Loading it again shows the old value.</p>
+<pre class="bad">Object.assign(doc, changes); return doc;</pre><pre class="good">await doc.save();   // or updateOne / findByIdAndUpdate</pre></div>
+
+  <div class="pat"><h4>Old cached data</h4><p class="why">Saving doesn't clear the saved copy.</p>
+<pre class="bad">addCar(): save only</pre><pre class="good">addCar(): save, then cache.del(key(owner))</pre></div>
+
+  <div class="pat"><h4>Error handler reads the wrong field</h4><p class="why">Every 404/403/409 becomes a 500.</p>
+<pre class="bad">res.status(err.statusCode || 500) // error uses .status</pre><pre class="good">res.status(err.status || 500)</pre></div>
+
+  <div class="pat"><h4><code>||</code> vs <code>&amp;&amp;</code></h4><p class="why">Write the rule in plain words, then check the operator.</p>
+<pre class="bad">if (!isAuthor || !isAgent) forbid();</pre><pre class="good">if (!isAuthor &amp;&amp; !isAgent) forbid();</pre></div>
+
+  <div class="pat"><h4>Capitals don't match</h4><p class="why">The check never fires.</p>
+<pre class="bad">status === 'CLOSED'   // saved as 'closed'</pre><pre class="good">status === STATUS.CLOSED</pre></div>
+
+  <div class="pat"><h4>Sort returns true/false</h4><p class="why">Sorting quietly does nothing.</p>
+<pre class="bad">arr.sort((a, b) => a.price > b.price)</pre><pre class="good">arr.sort((a, b) => a.price - b.price)</pre></div>
+
+  <div class="pat"><h4>Missing brackets with <code>? :</code></h4><p class="why"><code>a || b ? x : y</code> runs as <code>(a || b) ? x : y</code>.</p>
+<pre class="bad">b.r - a.r || a.t > b.t ? 1 : -1</pre><pre class="good">b.r - a.r || a.t.localeCompare(b.t)</pre></div>
+
+  <div class="pat"><h4><code>indexOf</code> used as true/false</h4><p class="why">0 counts as false, and -1 counts as true.</p>
+<pre class="bad">if (ALLOWED.indexOf(field)) reject();</pre><pre class="good">if (!ALLOWED.includes(field)) reject();</pre></div>
+
+  <div class="pat"><h4>Off by one</h4><p class="why">Test page 1, the last page, and the exact limit.</p>
+<pre class="bad">skip = page * limit;   rating: {$gt: min}</pre><pre class="good">skip = (page - 1) * limit;   rating: {$gte: min}</pre></div>
+
+  <div class="pat"><h4>Unsafe search pattern</h4><p class="why">"nolan" doesn't match "Nolan", and "(500" crashes.</p>
+<pre class="bad">{ title: { $regex: q } }</pre><pre class="good">{ title: { $regex: escape(q), $options: 'i' } }</pre></div>
+
+  <div class="pat"><h4>Two requests clash</h4><p class="why">Both see "1 left" and both buy it.</p>
+<pre class="bad">if (p.stock >= qty) await setStock(p.stock - qty);</pre><pre class="good">findOneAndUpdate({_id, stock: {$gte: qty}},
+                 {$inc: {stock: -qty}})</pre></div>
+
+  <div class="pat"><h4>Half-finished save</h4><p class="why">Item 1 is saved, item 2 fails, and nothing undoes item 1.</p>
+<pre class="bad">for (i of items) { check(i); save(i); }</pre><pre class="good">check all → save all → undo if anything fails</pre></div>
+
+  <div class="pat"><h4>Comparing objects instead of ids</h4><p class="why">Two objects are never equal, even with the same values.</p>
+<pre class="bad">list.includes({ movieId })
+a._id === b._id     // Mongo ObjectIds</pre><pre class="good">list.some(i => i.movieId === movieId)
+String(a._id) === String(b._id)</pre></div>
+
+  <div class="pat"><h4>Changing a shared list</h4><p class="why"><code>.sort()</code>, <code>.reverse()</code> and <code>.splice()</code> change the original list, which every request shares.</p>
+<pre class="bad">return products.sort(cmp);</pre><pre class="good">return [...products].sort(cmp);</pre></div>
+
+  <div class="pat"><h4>Money rounding</h4><p class="why">Round once, at the end. Watch the brackets.</p>
+<pre class="bad">Math.round(total * 100 / 100)</pre><pre class="good">Math.round(total * 100) / 100   // or store paise</pre></div>
+
+  <div class="pat"><h4><code>=</code> inside a condition</h4><p class="why">It sets the value instead of comparing. It's always true and changes data.</p>
+<pre class="bad">items.find(i => i.sku = sku)</pre><pre class="good">items.find(i => i.sku === sku)</pre></div>
+
+  <div class="pat"><h4><code>reduce</code> with no start value</h4><p class="why">The first item becomes the total, and an empty list crashes.</p>
+<pre class="bad">items.reduce((s, i) => s + i.price)</pre><pre class="good">items.reduce((s, i) => s + i.price, 0)</pre></div>
+
+  <div class="pat"><h4>Missing <code>break</code> in a switch</h4><p class="why">A case without <code>break</code> runs the next case too.</p>
+<pre class="bad">case 'local': fee = 40;
+case 'regional': fee = 60; break;</pre><pre class="good">case 'local': return 40;
+case 'regional': return 60;</pre></div>
+
+  <div class="pat"><h4><code>^</code> is not "power of"</h4><p class="why">In JavaScript, power is <code>**</code>.</p>
+<pre class="bad">BASE * 2 ^ n</pre><pre class="good">BASE * 2 ** n</pre></div>
+
+  <div class="pat"><h4><code>async</code> inside <code>forEach</code></h4><p class="why"><code>forEach</code> doesn't wait, so the reply goes out first.</p>
+<pre class="bad">list.forEach(async x => await save(x));
+res.json(...)</pre><pre class="good">await Promise.all(list.map(save));</pre></div>
+
+  <div class="pat"><h4><code>|| 'text'</code> is always true</h4><p class="why">Any non-empty text counts as true.</p>
+<pre class="bad">if (role === 'admin' || 'owner')</pre><pre class="good">if (role === 'admin' || id === p.ownerId)</pre></div>
+
+  <div class="pat"><h4><code>||</code> turns 0 into the default</h4><p class="why">0, '' and false all count as "missing".</p>
+<pre class="bad">const t = Number(q.threshold) || 5;</pre><pre class="good">const t = q.threshold === undefined ? 5 : Number(q.threshold);</pre></div>
+
+  <div class="pat"><h4>Numbers and true/false saved as text</h4><p class="why">As text, <code>'9'</code> comes after <code>'10'</code>, and <code>'false'</code> counts as true.</p>
+<pre class="bad">if (item.stock &lt;= '10')   if (!flag.enabled)</pre><pre class="good">Number(item.stock) &lt;= 10   flag.enabled === true || flag.enabled === 'true'</pre></div>
+
+  <div class="pat"><h4>Seconds vs milliseconds</h4><p class="why"><code>Date.now()</code> is in milliseconds. Token <code>exp</code> and Retry-After are in seconds.</p>
+<pre class="bad">now + 15 * 60     diff / 86400</pre><pre class="good">now + 15 * 60 * 1000     diff / 86_400_000</pre></div>
+
+  <div class="pat"><h4><code>splice(indexOf(x), 1)</code></h4><p class="why">If x isn't there, <code>indexOf</code> is -1, which removes the LAST item.</p>
+<pre class="bad">arr.splice(arr.indexOf(id), 1)</pre><pre class="good">const i = arr.indexOf(id); if (i === -1) return 404;</pre></div>
+
+  <div class="pat"><h4>Middleware order</h4><p class="why">Express runs things top to bottom. A route above <code>use(auth)</code> skips the login check.</p>
+<pre class="bad">app.get('/admin', h); app.use(auth);</pre><pre class="good">app.use(auth); app.get('/admin', h);</pre></div>
+
+  <div class="pat"><h4>Filter overwritten</h4><p class="why">Setting the same field twice keeps only the second.</p>
+<pre class="bad">f.price = {$gte: min}; f.price = {$lte: max};</pre><pre class="good">f.price = { $gte: min, $lte: max };</pre></div>
+
+  <div class="pat"><h4>Memory wiped on every call</h4><p class="why">Anything created inside a function starts fresh each time.</p>
+<pre class="bad">function topUp() { const seen = new Map(); ... }</pre><pre class="good">save the key in the database</pre></div>
+
+  <div class="pat"><h4>Time slots overlapping</h4><p class="why">10:00–10:30 and 10:30–11:00 do NOT overlap.</p>
+<pre class="bad">a.start &lt;= b.end &amp;&amp; b.start &lt;= a.end</pre><pre class="good">a.start &lt; b.end &amp;&amp; b.start &lt; a.end</pre></div>
+
+  <div class="pat"><h4>Average of averages</h4><p class="why">A day with 1 sample shouldn't count as much as a day with 100.</p>
+<pre class="bad">mean(days.map(d => d.avg))</pre><pre class="good">totalSum / totalCount</pre></div>
+
+  <div class="pat"><h4>Cache mistakes</h4><p class="why">The key must include the page/query. Never change the cached object.</p>
+<pre class="bad">key = req.path;  data.items.forEach(i => i.price *= 1.18)</pre><pre class="good">key = req.url;   items.map(i => ({ ...i, gst: ... }))</pre></div>
+</div>
+
+<h2 id="pb-hidden"><span class="n">06</span>Hidden-test checklist (use it in the last 10 minutes)</h2>
+<ul class="checks">
+  <li>Missing, empty, or spaces-only input → 400</li>
+  <li>0, negative numbers, text instead of a number</li>
+  <li>Exact limits: equal to the limit, the last page, past the end</li>
+  <li>Another user's item on <b>every</b> <code>/:id</code> route → 404 or 403</li>
+  <li>No login header → 401</li>
+  <li>After every save: load it again and check it stuck</li>
+  <li>A failed save leaves <b>nothing</b> half-changed</li>
+  <li>Doing the same thing twice: close twice, delete a missing item, add a duplicate</li>
+  <li>Retries with the same key, and requests with no key</li>
+  <li>Two requests at once on anything with a count (stock, seats, money)</li>
+  <li>Status codes: 201 for create, and 404 vs 400 vs 409</li>
+  <li>Reply shape unchanged: same fields, same types</li>
+</ul>
+
+<h2 id="pb-ai"><span class="n">07</span>Using the AI helper safely</h2>
+<ul>
+  <li><b>Find the failure first, then ask the AI.</b> "Fix this bug" gets you a confident rewrite of the wrong file.</li>
+  <li><b>Give it one small job:</b> "explain this function", "where is <code>req.user</code> used?", "why could this return <code>{}</code>?"</li>
+  <li><b>Read every line it changes.</b> Watch for edited tests, renamed routes, or changed reply shapes.</li>
+  <li><b>Never edit the tests</b> to make them pass, unless the task says a test is wrong.</li>
+  <li>Don't paste the test's code into outside tools.</li>
+</ul>
+<h3>A prompt that works</h3>
+<pre class="block">The app: Express + Mongoose. The request goes POST /tickets/:ticketId/replies → ticketController.addReply → ticketService.addReply.
+Expected: 201 with the reply (test "customer can reply to a ticket").
+What happens: 404 "Ticket not found". console.log(ticketId) in the service prints undefined.
+Only look at: ticketController.js and ticketService.js. Don't touch tests or routes.
+Please: explain the most likely cause in 2 sentences, then suggest the smallest change.</pre>
+
+<h2 id="pb-spring"><span class="n">08</span>Spring Boot: the same bugs in Java</h2>
+<p class="muted">Spring Boot levels are next. The same mistakes show up there too:</p>
+<div class="tbl"><table>
+<thead><tr><th>Node bug</th><th>What it looks like in Spring Boot</th></tr></thead>
+<tbody>
+<tr><td>Missing return after a reply</td><td>Code keeps going after <code>ResponseEntity.badRequest()</code>, or the wrong <code>@ResponseStatus</code></td></tr>
+<tr><td>Error handler reads the wrong field</td><td><code>@ControllerAdvice</code> catches the wrong error type, or turns everything into 500</td></tr>
+<tr><td>URL values / defaults</td><td><code>@RequestParam</code> with no <code>defaultValue</code>, required by default, or the wrong name</td></tr>
+<tr><td>Wrong route name</td><td><code>@PathVariable("id")</code> while the path says <code>{ticketId}</code></td></tr>
+<tr><td>Changed but not saved</td><td>Changing an entity without <code>repository.save()</code> or <code>@Transactional</code></td></tr>
+<tr><td>Comparing objects</td><td><code>==</code> on <code>String</code> or <code>Long</code> (works up to 127, then breaks). Use <code>.equals()</code></td></tr>
+<tr><td>Capitals in search</td><td><code>findByTitleContaining</code> vs <code>findByTitleContainingIgnoreCase</code></td></tr>
+<tr><td>Off by one in paging</td><td><code>PageRequest.of(page, size)</code> starts at 0; <code>GreaterThan</code> vs <code>GreaterThanEqual</code></td></tr>
+<tr><td>Sorting</td><td><code>.reversed()</code> applied to the whole chain; wrong <code>Sort.by</code> direction</td></tr>
+<tr><td>Two requests clash / half saves</td><td>Missing <code>@Transactional</code>, or missing <code>@Version</code> for locking</td></tr>
+<tr><td>No owner check</td><td><code>findById(id)</code> instead of <code>findByIdAndOwnerId(id, userId)</code></td></tr>
+<tr><td>Missing value crashes</td><td><code>Optional.get()</code> without checking → 500</td></tr>
+</tbody></table></div>
+
+<h2 id="pb-sources"><span class="n">↗</span>Sources</h2>
+<ul style="font-size:14px">
+  <li><a href="https://leetcode.com/discuss/post/8350328/amazon-oa-experience-sde-1-chances-of-ca-y3au/" target="_blank" rel="noopener">LeetCode: Amazon SDE-1 test (puzzle + AI bug task, pick MERN/Django/Spring Boot)</a></li>
+  <li><a href="https://prachub.com/interview-experiences/amazon-software-engineer-interview-experience-a-segmented-array-oa-problem-that-even-chatgpt-couldnt-solve" target="_blank" rel="noopener">PracHub: 40-min puzzle + 60-min AI task, about 6 failing tests, Node.js</a></li>
+  <li><a href="https://leetcode.com/discuss/post/8444926/amazon-sde-online-assessment-2026-recent-etbq/" target="_blank" rel="noopener">LeetCode: intern test email, 100-minute coding part</a></li>
+  <li><a href="https://leetcode.com/discuss/post/8523471/amazon-sde-intern-oa-experience-by-kevin-4hnn/" target="_blank" rel="noopener">LeetCode: support-ticket app, 6 tests</a></li>
+  <li><a href="https://prachub.com/interview-questions/debug-a-node-js-car-rental-backend-leaked-cars-missing-new-cars-lost-edits" target="_blank" rel="noopener">PracHub: Node car rental app (leaked cars, missing cars, lost edits)</a></li>
+  <li><a href="https://prachub.com/interview-questions/fix-a-buggy-spring-boot-movie-search-against-five-search-rules" target="_blank" rel="noopener">PracHub: Spring Boot movie search, five rules</a></li>
+  <li><a href="https://prachub.com/interview-questions/debug-watch-list-movie-operations" target="_blank" rel="noopener">PracHub: movie watch-list bugs</a></li>
+  <li><a href="https://prachub.com/resources/amazon-ai-assisted-coding-oa-guide-2026-repository-bugs-ai-prompts-and-hidden-tests" target="_blank" rel="noopener">PracHub: guide to the AI test (hidden tests, steps, AI rules)</a></li>
+  <li><a href="https://igotanoffer.com/en/advice/amazon-online-assessment" target="_blank" rel="noopener">IGotAnOffer: watched test, fix three bugs with a live preview</a></li>
+  <li><a href="https://www.techinterview.org/post/3233476091/debugging-interview-format/" target="_blank" rel="noopener">techinterview.org: bug-fixing interviews at different companies</a></li>
+</ul>

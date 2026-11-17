@@ -1,0 +1,170 @@
+@@@ meta.json
+{
+  "id": "h8",
+  "difficulty": "hard",
+  "title": "Product filters & paging",
+  "minutes": 40,
+  "tagline": "The max-price filter wipes out the min-price filter, total counts one page, brand is case-sensitive, and page=0 returns the last page.",
+  "tags": ["query building", "totals", "case-insensitive match", "negative slice"],
+  "lookFor": [
+    "Building a filter object: assigning `filter.price = …` twice overwrites the first. Merge operators on the same field.",
+    "`total` must be counted BEFORE slicing to a page.",
+    "Exact but case-insensitive match = anchored regex `^…$` with the `i` flag (and escaping).",
+    "`slice(-n)` counts from the END. Validate page ≥ 1 before computing skip."
+  ],
+  "bugs": [
+    {
+      "symptom": "minPrice ignored when maxPrice is also given",
+      "file": "src/search.js",
+      "hints": ["Log the filter object for `?minPrice=100&maxPrice=500`."],
+      "cause": "`filter.price = { $lte: max }` replaces the earlier `{ $gte: min }`.",
+      "fix": "`filter.price = { ...(filter.price || {}), $lte: max }` (or build `range` then assign once)",
+      "pattern": "Overwritten filter key"
+    },
+    {
+      "symptom": "total is the page size",
+      "file": "src/search.js",
+      "hints": ["Which array's length becomes total?"],
+      "cause": "`total` is the length of the paged slice, not of all matches.",
+      "fix": "`const total = all.length;` before slicing",
+      "pattern": "Count after paging"
+    },
+    {
+      "symptom": "brand=apple finds nothing",
+      "file": "src/search.js",
+      "hints": ["Stored as 'Apple'. Is the match case-insensitive?"],
+      "cause": "Exact equality is case-sensitive.",
+      "fix": "`filter.brand = { $regex: `^${escape(brand)}$`, $options: 'i' }`",
+      "pattern": "Case-sensitive exact match"
+    },
+    {
+      "symptom": "(hidden) page=0 returns the last items",
+      "file": "src/search.js",
+      "hints": ["skip = (0 − 1) × size = ? What does slice do with a negative start?"],
+      "cause": "A negative skip makes `slice` count from the end.",
+      "fix": "Validate: `if (!Number.isInteger(page) || page < 1) → 400`",
+      "pattern": "Negative slice index"
+    }
+  ]
+}
+@@@ ticket.md
+# SRCH-50: Filters return wrong products
+
+`GET /items?minPrice=&maxPrice=&brand=&page=&size=` → `{ total, page, items }`
+
+* `minPrice` and `maxPrice` include the exact value. `brand` must match exactly, but capitals don't matter.
+* `page` ≥ 1 (default 1), `size` default 3. Invalid page → **400**.
+* `total` = all matches (before paging). Items in catalog order.
+@@@ repo/package.json
+{ "name": "search", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/search.js
+const db = require('memdb');
+const items = db.collection('items');
+
+const SEED = [
+  ['iPhone 15', 'Apple', 79900], ['AirPods', 'Apple', 12900], ['Galaxy S24', 'Samsung', 74999],
+  ['Galaxy Buds', 'Samsung', 9999], ['Pixel 8', 'Google', 75999], ['Apple Pencil', 'Apple', 9500],
+  ['Echo Dot', 'Amazon', 4499], ['Kindle', 'Amazon', 13999],
+];
+const ready = Promise.all(SEED.map(([name, brand, price]) => items.insert({ name, brand, price })));
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+async function search(q) {
+  await ready;
+  const page = q.page === undefined ? 1 : Number(q.page);
+  const size = Number(q.size) || 3;
+
+  const filter = {};
+  if (q.minPrice !== undefined) filter.price = { $gte: Number(q.minPrice) };
+  if (q.maxPrice !== undefined) filter.price = { $lte: Number(q.maxPrice) };
+  if (q.brand) filter.brand = q.brand;
+
+  const all = await items.find(filter);
+  const pageItems = all.slice((page - 1) * size, page * size);
+  return { total: pageItems.length, page, items: pageItems };
+}
+
+module.exports = { search, HttpError };
+@@@ repo/src/app.js
+const express = require('express');
+const { search } = require('./search');
+
+const app = express();
+app.get('/items', async (req, res) => res.json(await search(req.query)));
+app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
+
+module.exports = app;
+@@@ repo/tests/search.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const names = (res) => res.body.items.map((i) => i.name);
+
+describe('Item search', () => {
+  test('price range uses both bounds', async () => {
+    const res = await request(app).get('/items?minPrice=9999&maxPrice=13999&size=10');
+    expect(names(res)).toEqual(['AirPods', 'Galaxy Buds', 'Kindle']);
+  });
+  test('total counts all matches', async () => {
+    const res = await request(app).get('/items?size=2');
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.total).toBe(8);
+  });
+  test('brand is case-insensitive', async () => {
+    const res = await request(app).get('/items?brand=apple');
+    expect(names(res)).toEqual(['iPhone 15', 'AirPods', 'Apple Pencil']);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+describe('hidden', () => {
+  test('page=0 → 400', async () => { expect((await request(app).get('/items?page=0')).status).toBe(400); });
+  test('page=abc → 400', async () => { expect((await request(app).get('/items?page=abc')).status).toBe(400); });
+  test('brand must match exactly (not prefix)', async () => {
+    expect((await request(app).get('/items?brand=app')).body.total).toBe(0);
+  });
+  test('page 2 of a max-price filter', async () => {
+    const res = await request(app).get('/items?maxPrice=13999&page=2&size=2');
+    expect(res.body.items.map((i) => i.name)).toEqual(['Apple Pencil', 'Echo Dot']);
+    expect(res.body.total).toBe(5);
+  });
+  test('brand + price', async () => {
+    const res = await request(app).get('/items?brand=AMAZON&minPrice=5000');
+    expect(res.body.items.map((i) => i.name)).toEqual(['Kindle']);
+  });
+});
+@@@ solution/src/search.js
+const db = require('memdb');
+const items = db.collection('items');
+
+const SEED = [
+  ['iPhone 15', 'Apple', 79900], ['AirPods', 'Apple', 12900], ['Galaxy S24', 'Samsung', 74999],
+  ['Galaxy Buds', 'Samsung', 9999], ['Pixel 8', 'Google', 75999], ['Apple Pencil', 'Apple', 9500],
+  ['Echo Dot', 'Amazon', 4499], ['Kindle', 'Amazon', 13999],
+];
+const ready = Promise.all(SEED.map(([name, brand, price]) => items.insert({ name, brand, price })));
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+async function search(q) {
+  await ready;
+  const page = q.page === undefined ? 1 : Number(q.page);
+  if (!Number.isInteger(page) || page < 1) throw new HttpError(400, 'page must be an integer >= 1');
+  const size = Number(q.size) || 3;
+
+  const filter = {};
+  const price = {};
+  if (q.minPrice !== undefined) price.$gte = Number(q.minPrice);
+  if (q.maxPrice !== undefined) price.$lte = Number(q.maxPrice);
+  if (Object.keys(price).length) filter.price = price;
+  if (q.brand) filter.brand = { $regex: `^${escape(q.brand)}$`, $options: 'i' };
+
+  const all = await items.find(filter);
+  return { total: all.length, page, items: all.slice((page - 1) * size, page * size) };
+}
+
+module.exports = { search, HttpError };

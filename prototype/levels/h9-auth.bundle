@@ -1,0 +1,223 @@
+@@@ meta.json
+{
+  "id": "h9",
+  "difficulty": "hard",
+  "title": "Token auth middleware",
+  "minutes": 40,
+  "tagline": "Admin route registered before auth, every token looks expired, any signature passes, and demoted admins keep their powers.",
+  "tags": ["middleware order", "exp in seconds", "signature checks", "stale claims"],
+  "lookFor": [
+    "Express runs routes in registration order. A route defined ABOVE `app.use(auth)` is public.",
+    "JWT `exp` is in SECONDS. `Date.now()` is ms.",
+    "A signature check must COMPARE the signature to the recomputed one. 'Is there one' is not a check.",
+    "Authorization data that can change (roles) should come from the DB, not a long-lived token."
+  ],
+  "bugs": [
+    {
+      "symptom": "/admin/stats works with no token",
+      "file": "src/app.js",
+      "hints": ["Where is the admin route registered relative to `app.use(auth)`?"],
+      "cause": "The route is registered before the auth middleware, so it never runs through it.",
+      "fix": "Register `app.use(auth)` before protected routes (or attach `auth` to the route directly).",
+      "pattern": "Middleware order"
+    },
+    {
+      "symptom": "Every valid token is rejected as expired",
+      "file": "src/auth.js",
+      "hints": ["`exp` is in seconds. What is `clock.now()`?"],
+      "cause": "ms timestamp > seconds timestamp is always true.",
+      "fix": "`if (clock.now() >= payload.exp * 1000) → 401`",
+      "pattern": "Seconds vs milliseconds"
+    },
+    {
+      "symptom": "A token edited to role=admin is accepted",
+      "file": "src/auth.js",
+      "hints": ["Read the signature check carefully. What is compared to what?"],
+      "cause": "`if (!sig || !sign(body))` only checks both exist. Any signature passes.",
+      "fix": "`if (!sig || sig !== sign(body)) → 401`",
+      "pattern": "Signature not actually compared"
+    },
+    {
+      "symptom": "(hidden) Demoted admin still gets admin access",
+      "file": "src/auth.js",
+      "hints": ["Where does `req.user.role` come from?"],
+      "cause": "The role is taken from the token, which stays valid after the DB role changes.",
+      "fix": "Load the user by `payload.sub` and use the DB role (401 if the user no longer exists).",
+      "pattern": "Stale authorization claims"
+    }
+  ]
+}
+@@@ ticket.md
+# SEC-21: Auth bypass report
+
+Tokens: `base64url(JSON payload) + "." + signature`, payload `{ sub, role, exp }` (`exp` = **unix seconds**). `src/token.js` makes them (it's correct).
+
+| Path | Who |
+|---|---|
+| `GET /health` | anyone |
+| `GET /me` | any valid token → `{ id, role }` |
+| `GET /admin/stats` | valid token **and** the user's **current DB role** is `admin` → else **403** |
+
+Missing/invalid/expired token → **401**. Clock is frozen (tests move it).
+@@@ repo/package.json
+{ "name": "auth", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/clock.js
+let t = Date.UTC(2026, 5, 1, 12, 0, 0);
+module.exports = { now: () => t, advance: (ms) => { t += ms; } };
+@@@ repo/src/users.js
+// Pretend DB. Tests may change roles.
+module.exports = new Map([
+  ['u-admin', { id: 'u-admin', role: 'admin' }],
+  ['u-dev', { id: 'u-dev', role: 'member' }],
+]);
+@@@ repo/src/token.js
+const SECRET = 's3cr3t';
+
+function b64(s) { return btoa(s).replace(/=+$/, ''); }
+function unb64(s) { return atob(s); }
+function sign(body) {
+  const h = [...(body + SECRET)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7);
+  return (h >>> 0).toString(16);
+}
+function issue(payload) {
+  const body = b64(JSON.stringify(payload));
+  return `${body}.${sign(body)}`;
+}
+
+module.exports = { issue, sign, b64, unb64 };
+@@@ repo/src/auth.js
+const clock = require('./clock');
+const users = require('./users');
+const { sign, unb64 } = require('./token');
+
+module.exports = function auth(req, res, next) {
+  const header = req.get('authorization') || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'missing token' });
+
+  const [body, sig] = token.split('.');
+  if (!sig || !sign(body)) return res.status(401).json({ error: 'bad signature' });
+
+  let payload;
+  try { payload = JSON.parse(unb64(body)); } catch (e) { return res.status(401).json({ error: 'bad token' }); }
+  if (clock.now() > payload.exp) return res.status(401).json({ error: 'token expired' });
+
+  req.user = { id: payload.sub, role: payload.role };
+  next();
+};
+@@@ repo/src/app.js
+const express = require('express');
+const auth = require('./auth');
+
+const app = express();
+
+app.get('/health', (req, res) => res.json({ ok: true }));
+
+app.get('/admin/stats', (req, res) => {
+  if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: 'admins only' });
+  res.json({ users: 2 });
+});
+
+app.use(auth);
+
+app.get('/me', (req, res) => res.json(req.user));
+
+module.exports = app;
+@@@ repo/tests/auth.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const clock = require('../src/clock');
+const { issue, b64 } = require('../src/token');
+
+const tok = (sub, role, ttlSec = 3600) => issue({ sub, role, exp: Math.floor(clock.now() / 1000) + ttlSec });
+const get = (url, token) => { const r = request(app).get(url); if (token) r.set('Authorization', `Bearer ${token}`); return r; };
+
+describe('Auth', () => {
+  test('admin route needs a token', async () => {
+    expect((await get('/admin/stats')).status).toBe(401);
+  });
+  test('a valid token works', async () => {
+    const res = await get('/me', tok('u-dev', 'member'));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: 'u-dev', role: 'member' });
+  });
+  test('a tampered token is rejected', async () => {
+    const real = tok('u-dev', 'member');
+    const forged = b64(JSON.stringify({ sub: 'u-dev', role: 'admin', exp: 9999999999 })) + '.' + real.split('.')[1];
+    expect((await get('/admin/stats', forged)).status).toBe(401);
+  });
+  test('admin can see stats', async () => {
+    expect((await get('/admin/stats', tok('u-admin', 'admin'))).status).toBe(200);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const clock = require('../src/clock');
+const users = require('../src/users');
+const { issue } = require('../src/token');
+
+const tok = (sub, role, ttlSec = 3600) => issue({ sub, role, exp: Math.floor(clock.now() / 1000) + ttlSec });
+const get = (url, token) => { const r = request(app).get(url); if (token) r.set('Authorization', `Bearer ${token}`); return r; };
+
+describe('hidden', () => {
+  test('expired token → 401', async () => {
+    const t = tok('u-dev', 'member', 60);
+    clock.advance(61 * 1000);
+    expect((await get('/me', t)).status).toBe(401);
+  });
+  test('demoted admin loses access immediately', async () => {
+    const t = tok('u-admin', 'admin');
+    users.get('u-admin').role = 'member';
+    expect((await get('/admin/stats', t)).status).toBe(403);
+  });
+  test('member token → 403 on admin route', async () => {
+    expect((await get('/admin/stats', tok('u-dev', 'member'))).status).toBe(403);
+  });
+  test('health is public', async () => {
+    expect((await get('/health')).status).toBe(200);
+  });
+  test('deleted user → 401', async () => {
+    expect((await get('/me', tok('u-ghost', 'admin'))).status).toBe(401);
+  });
+});
+@@@ solution/src/auth.js
+const clock = require('./clock');
+const users = require('./users');
+const { sign, unb64 } = require('./token');
+
+module.exports = function auth(req, res, next) {
+  const header = req.get('authorization') || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'missing token' });
+
+  const [body, sig] = token.split('.');
+  if (!sig || sig !== sign(body)) return res.status(401).json({ error: 'bad signature' });
+
+  let payload;
+  try { payload = JSON.parse(unb64(body)); } catch (e) { return res.status(401).json({ error: 'bad token' }); }
+  if (clock.now() >= payload.exp * 1000) return res.status(401).json({ error: 'token expired' });
+
+  const user = users.get(payload.sub);
+  if (!user) return res.status(401).json({ error: 'unknown user' });
+  req.user = { id: user.id, role: user.role };
+  next();
+};
+@@@ solution/src/app.js
+const express = require('express');
+const auth = require('./auth');
+
+const app = express();
+
+app.get('/health', (req, res) => res.json({ ok: true }));
+
+app.use(auth);
+
+app.get('/admin/stats', (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'admins only' });
+  res.json({ users: 2 });
+});
+
+app.get('/me', (req, res) => res.json(req.user));
+
+module.exports = app;

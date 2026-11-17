@@ -1,0 +1,248 @@
+@@@ meta.json
+{
+  "id": "e5",
+  "difficulty": "easy",
+  "title": "Shopping cart totals",
+  "minutes": 15,
+  "tagline": "One `=` instead of `===`, a reduce with no starting value, and a 10% coupon that takes 100%.",
+  "tags": ["assignment in condition", "reduce", "percentages"],
+  "lookFor": [
+    "`find((i) => i.sku = sku)` ASSIGNS. It's always truthy and overwrites data. Look for single `=` inside conditions and callbacks.",
+    "`reduce` without an initial value uses the first element as the accumulator. On an array of objects that gives you object + number. Always pass `0`.",
+    "Percent stored as 10 means 10/100. Check the unit of every stored number."
+  ],
+  "bugs": [
+    {
+      "symptom": "Adding a second product overwrites the first",
+      "file": "src/cartService.js",
+      "hints": ["Look very closely at the callback passed to `cart.items.find`."],
+      "cause": "`i.sku = sku` is an assignment, not a comparison. It sets the first line's sku and returns a truthy string, so every add 'finds' line 1 and merges into it.",
+      "fix": "`cart.items.find((i) => i.sku === sku)`",
+      "pattern": "Assignment instead of comparison"
+    },
+    {
+      "symptom": "Subtotal is '[object Object]…' or the cart crashes when empty",
+      "file": "src/cartService.js",
+      "hints": ["What is the accumulator on the first call to reduce when no initial value is given?"],
+      "cause": "`reduce((sum, i) => …)` with no initial value starts with `sum = items[0]` (an object). On an empty array it throws a TypeError.",
+      "fix": "`cart.items.reduce((sum, i) => sum + i.price * i.qty, 0)`",
+      "pattern": "reduce without an initial value"
+    },
+    {
+      "symptom": "SAVE10 takes 10× the subtotal off",
+      "file": "src/cartService.js",
+      "hints": ["How is `percent` stored in catalog.js?"],
+      "cause": "Coupons store `percent: 10`, but the code multiplies by 10 instead of 0.10.",
+      "fix": "`subtotal * coupon.percent / 100`",
+      "pattern": "Unit mismatch (percent)"
+    },
+    {
+      "symptom": "(hidden) 'save10' in lowercase is rejected",
+      "file": "src/cartService.js",
+      "hints": ["How are coupon keys written in the catalog?"],
+      "cause": "Coupon lookup is case-sensitive, but codes are meant to be case-insensitive.",
+      "fix": "`const key = String(code).trim().toUpperCase();`",
+      "pattern": "Input not normalised"
+    }
+  ]
+}
+@@@ ticket.md
+# CART-12: Cart totals are wrong
+
+## API (header `x-user-id`)
+| Method | Path | Behaviour |
+|---|---|---|
+| `POST` | `/cart/items` `{ sku, qty }` | **201** + cart summary. Same SKU again → quantities merge into one line. Unknown SKU → **404**, bad qty → **400** |
+| `GET` | `/cart` | `{ items, subtotal, discount, total }`. Empty cart → all zero |
+| `POST` | `/cart/coupon` `{ code }` | Apply coupon (case-insensitive). Unknown → **404** |
+
+`SAVE10` = 10% off the subtotal.
+@@@ repo/package.json
+{ "name": "cart-service", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/app.js
+const express = require('express');
+const cart = require('./cartService');
+const { PRICES } = require('./catalog');
+
+const app = express();
+app.use(express.json());
+app.use((req, res, next) => {
+  req.userId = req.get('x-user-id') || 'guest';
+  next();
+});
+
+app.post('/cart/items', async (req, res) => {
+  const { sku, qty } = req.body;
+  if (!PRICES[sku]) return res.status(404).json({ error: 'unknown sku' });
+  if (!Number.isInteger(qty) || qty < 1) return res.status(400).json({ error: 'qty must be a positive integer' });
+  res.status(201).json(await cart.addItem(req.userId, sku, qty));
+});
+
+app.get('/cart', async (req, res) => {
+  res.json(await cart.view(req.userId));
+});
+
+app.post('/cart/coupon', async (req, res) => {
+  const result = await cart.applyCoupon(req.userId, req.body.code);
+  if (!result) return res.status(404).json({ error: 'unknown coupon' });
+  res.json(result);
+});
+
+module.exports = app;
+@@@ repo/src/catalog.js
+exports.PRICES = { 'SKU-PEN': 20, 'SKU-BOOK': 350, 'SKU-BAG': 1200 };
+exports.COUPONS = { SAVE10: { percent: 10 } };
+@@@ repo/src/cartService.js
+const db = require('memdb');
+const { PRICES, COUPONS } = require('./catalog');
+
+const carts = db.collection('carts');
+
+async function getCart(userId) {
+  const cart = await carts.findOne({ userId });
+  return cart || carts.insert({ userId, items: [], coupon: null });
+}
+
+function summary(cart) {
+  const subtotal = cart.items.reduce((sum, i) => sum + i.price * i.qty);
+  const coupon = cart.coupon ? COUPONS[cart.coupon] : null;
+  const discount = coupon ? subtotal * coupon.percent : 0;
+  return { items: cart.items, subtotal, discount, total: subtotal - discount };
+}
+
+async function addItem(userId, sku, qty) {
+  const cart = await getCart(userId);
+  const existing = cart.items.find((i) => i.sku = sku);
+  if (existing) existing.qty += qty;
+  else cart.items.push({ sku, qty, price: PRICES[sku] });
+  await carts.updateById(cart._id, { items: cart.items });
+  return summary(cart);
+}
+
+async function view(userId) {
+  return summary(await getCart(userId));
+}
+
+async function applyCoupon(userId, code) {
+  if (!COUPONS[code]) return null;
+  const cart = await getCart(userId);
+  cart.coupon = code;
+  await carts.updateById(cart._id, { coupon: code });
+  return summary(cart);
+}
+
+module.exports = { addItem, view, applyCoupon };
+@@@ repo/tests/cart.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const add = (sku, qty) => request(app).post('/cart/items').set('x-user-id', 'u1').send({ sku, qty });
+const view = () => request(app).get('/cart').set('x-user-id', 'u1');
+
+describe('Cart', () => {
+  test('single item subtotal', async () => {
+    await add('SKU-PEN', 3);
+    const res = await view();
+    expect(res.body.subtotal).toBe(60);
+    expect(res.body.total).toBe(60);
+  });
+
+  test('two different products are two lines', async () => {
+    await add('SKU-PEN', 2);
+    await add('SKU-BOOK', 1);
+    const res = await view();
+    expect(res.body.items.map((i) => i.sku)).toEqual(['SKU-PEN', 'SKU-BOOK']);
+    expect(res.body.subtotal).toBe(390);
+  });
+
+  test('SAVE10 takes 10% off', async () => {
+    await add('SKU-PEN', 2);
+    await add('SKU-BOOK', 1);
+    const res = await request(app).post('/cart/coupon').set('x-user-id', 'u1').send({ code: 'SAVE10' });
+    expect(res.body.discount).toBe(39);
+    expect(res.body.total).toBe(351);
+  });
+
+  test('empty cart is all zeros', async () => {
+    const res = await view();
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ subtotal: 0, discount: 0, total: 0 });
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const add = (sku, qty) => request(app).post('/cart/items').set('x-user-id', 'u1').send({ sku, qty });
+
+describe('hidden', () => {
+  test('same SKU twice merges into one line', async () => {
+    await add('SKU-PEN', 2);
+    const res = await add('SKU-PEN', 3);
+    expect(res.body.items).toEqual([{ sku: 'SKU-PEN', qty: 5, price: 20 }]);
+  });
+
+  test('coupon is case-insensitive', async () => {
+    await add('SKU-BAG', 1);
+    const res = await request(app).post('/cart/coupon').set('x-user-id', 'u1').send({ code: ' save10 ' });
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(1080);
+  });
+
+  test('unknown coupon → 404', async () => {
+    const res = await request(app).post('/cart/coupon').set('x-user-id', 'u1').send({ code: 'FREE' });
+    expect(res.status).toBe(404);
+  });
+
+  test('qty 0 → 400, unknown sku → 404', async () => {
+    expect((await add('SKU-PEN', 0)).status).toBe(400);
+    expect((await add('SKU-NOPE', 1)).status).toBe(404);
+  });
+
+  test('carts are per user', async () => {
+    await add('SKU-PEN', 1);
+    const res = await request(app).get('/cart').set('x-user-id', 'u2');
+    expect(res.body.items).toEqual([]);
+  });
+});
+@@@ solution/src/cartService.js
+const db = require('memdb');
+const { PRICES, COUPONS } = require('./catalog');
+
+const carts = db.collection('carts');
+
+async function getCart(userId) {
+  const cart = await carts.findOne({ userId });
+  return cart || carts.insert({ userId, items: [], coupon: null });
+}
+
+function summary(cart) {
+  const subtotal = cart.items.reduce((sum, i) => sum + i.price * i.qty, 0);
+  const coupon = cart.coupon ? COUPONS[cart.coupon] : null;
+  const discount = coupon ? subtotal * coupon.percent / 100 : 0;
+  return { items: cart.items, subtotal, discount, total: subtotal - discount };
+}
+
+async function addItem(userId, sku, qty) {
+  const cart = await getCart(userId);
+  const existing = cart.items.find((i) => i.sku === sku);
+  if (existing) existing.qty += qty;
+  else cart.items.push({ sku, qty, price: PRICES[sku] });
+  await carts.updateById(cart._id, { items: cart.items });
+  return summary(cart);
+}
+
+async function view(userId) {
+  return summary(await getCart(userId));
+}
+
+async function applyCoupon(userId, code) {
+  const key = String(code || '').trim().toUpperCase();
+  if (!COUPONS[key]) return null;
+  const cart = await getCart(userId);
+  cart.coupon = key;
+  await carts.updateById(cart._id, { coupon: key });
+  return summary(cart);
+}
+
+module.exports = { addItem, view, applyCoupon };

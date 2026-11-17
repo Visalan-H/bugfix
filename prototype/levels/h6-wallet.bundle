@@ -1,0 +1,213 @@
+@@@ meta.json
+{
+  "id": "h6",
+  "difficulty": "hard",
+  "title": "Wallet ledger & refunds",
+  "minutes": 40,
+  "tagline": "Balance adds debits instead of subtracting them, idempotency forgets everything, refunds exceed the payment, and you can pay with money you don't have.",
+  "tags": ["ledgers", "idempotency scope", "refund limits", "balance checks"],
+  "lookFor": [
+    "Ledger balance = Σ credits − Σ debits. Check the sign of every entry type.",
+    "State declared INSIDE a handler (`const seen = new Map()`) resets on every request. Idempotency state must outlive the request.",
+    "Refunds: the total refunded across ALL refunds must not exceed the original amount.",
+    "Never let a debit take the balance below zero."
+  ],
+  "bugs": [
+    {
+      "symptom": "Balance goes UP after a payment",
+      "file": "src/wallet.js",
+      "hints": ["Look at the reduce in balance(). Does it care about `type`?"],
+      "cause": "Every entry's amount is added, debits included.",
+      "fix": "`s + (e.type === 'debit' ? -e.amount : e.amount)`",
+      "pattern": "Sign error in an aggregate"
+    },
+    {
+      "symptom": "Retried top-up with the same key credits twice",
+      "file": "src/wallet.js",
+      "hints": ["Where is `seen` created? How long does it live?"],
+      "cause": "The idempotency map is created inside `topUp`, so it's empty on every call.",
+      "fix": "Persist it: store `idempotencyKey` on the ledger entry and look it up (`ledger.findOne({ walletId, idempotencyKey })`).",
+      "pattern": "Request-scoped state used as global"
+    },
+    {
+      "symptom": "Refunds can exceed the payment",
+      "file": "src/wallet.js",
+      "hints": ["Does refund look at what's already been refunded for that payment?"],
+      "cause": "No check against the original amount or the earlier refunds.",
+      "fix": "`refunded = Σ refunds where paymentId`; `if (refunded + amount > payment.amount) → 400`",
+      "pattern": "Cumulative limit not enforced"
+    },
+    {
+      "symptom": "(hidden) Paying more than the balance works",
+      "file": "src/wallet.js",
+      "hints": ["Is the balance checked before the debit?"],
+      "cause": "No funds check before writing the debit.",
+      "fix": "`if (await balance(walletId) < amount) throw new HttpError(409, 'insufficient funds')`",
+      "pattern": "Missing balance check"
+    }
+  ]
+}
+@@@ ticket.md
+# PAY-77: Wallet balances drift
+
+Amounts are **integers in paise**. Every change is a ledger entry `{ walletId, type: 'credit'|'debit', amount, … }`. Balance = credits − debits.
+
+| Method | Path | Behaviour |
+|---|---|---|
+| `POST` | `/wallets/:id/topup { amount }` + optional `Idempotency-Key` (unique id for safe retries) | **201**. Same key again → same entry, no new credit (200) |
+| `POST` | `/wallets/:id/pay { amount }` | Debit. Not enough balance → **409** |
+| `POST` | `/payments/:paymentId/refund { amount }` | Credit back. Total refunds ≤ payment amount → else **400** |
+| `GET` | `/wallets/:id` | `{ balance }` |
+@@@ repo/package.json
+{ "name": "wallet", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/wallet.js
+const db = require('memdb');
+const ledger = db.collection('ledger');
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+const positiveInt = (n) => Number.isInteger(n) && n > 0;
+
+async function balance(walletId) {
+  const entries = await ledger.find({ walletId });
+  return entries.reduce((s, e) => s + e.amount, 0);
+}
+
+async function topUp(walletId, amount, key) {
+  const seen = new Map();
+  if (!positiveInt(amount)) throw new HttpError(400, 'amount must be a positive integer (paise)');
+  if (key && seen.has(key)) return { entry: seen.get(key), replay: true };
+  const entry = await ledger.insert({ walletId, type: 'credit', reason: 'topup', amount });
+  if (key) seen.set(key, entry);
+  return { entry, replay: false };
+}
+
+async function pay(walletId, amount) {
+  if (!positiveInt(amount)) throw new HttpError(400, 'bad amount');
+  return ledger.insert({ walletId, type: 'debit', reason: 'payment', amount });
+}
+
+async function refund(paymentId, amount) {
+  if (!positiveInt(amount)) throw new HttpError(400, 'bad amount');
+  const payment = await ledger.findOne({ _id: paymentId, reason: 'payment' });
+  if (!payment) throw new HttpError(404, 'payment not found');
+  return ledger.insert({ walletId: payment.walletId, type: 'credit', reason: 'refund', paymentId, amount });
+}
+
+module.exports = { balance, topUp, pay, refund };
+@@@ repo/src/app.js
+const express = require('express');
+const w = require('./wallet');
+
+const app = express();
+app.use(express.json());
+app.post('/wallets/:id/topup', async (req, res) => {
+  const { entry, replay } = await w.topUp(req.params.id, req.body.amount, req.get('idempotency-key'));
+  res.status(replay ? 200 : 201).json(entry);
+});
+app.post('/wallets/:id/pay', async (req, res) => res.status(201).json(await w.pay(req.params.id, req.body.amount)));
+app.post('/payments/:id/refund', async (req, res) => res.status(201).json(await w.refund(req.params.id, req.body.amount)));
+app.get('/wallets/:id', async (req, res) => res.json({ balance: await w.balance(req.params.id) }));
+app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
+
+module.exports = app;
+@@@ repo/tests/wallet.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const topup = (amount, key) => { const r = request(app).post('/wallets/w1/topup'); if (key) r.set('Idempotency-Key', key); return r.send({ amount }); };
+const pay = (amount) => request(app).post('/wallets/w1/pay').send({ amount });
+const refund = (id, amount) => request(app).post(`/payments/${id}/refund`).send({ amount });
+const bal = async () => (await request(app).get('/wallets/w1')).body.balance;
+
+describe('Wallet', () => {
+  test('payment reduces the balance', async () => {
+    await topup(100000);
+    await pay(30000);
+    expect(await bal()).toBe(70000);
+  });
+  test('same Idempotency-Key credits once', async () => {
+    const a = await topup(5000, 'k1');
+    const b = await topup(5000, 'k1');
+    expect(b.status).toBe(200);
+    expect(b.body._id).toBe(a.body._id);
+    expect(await bal()).toBe(5000);
+  });
+  test('refunds cannot exceed the payment', async () => {
+    await topup(100000);
+    const p = await pay(50000);
+    expect((await refund(p.body._id, 30000)).status).toBe(201);
+    expect((await refund(p.body._id, 30000)).status).toBe(400);
+    expect(await bal()).toBe(80000);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const topup = (amount, key, w = 'w1') => { const r = request(app).post(`/wallets/${w}/topup`); if (key) r.set('Idempotency-Key', key); return r.send({ amount }); };
+const pay = (amount, w = 'w1') => request(app).post(`/wallets/${w}/pay`).send({ amount });
+
+describe('hidden', () => {
+  test('cannot pay more than the balance', async () => {
+    await topup(1000);
+    expect((await pay(1001)).status).toBe(409);
+    expect((await request(app).get('/wallets/w1')).body.balance).toBe(1000);
+  });
+  test('exact balance payment is fine', async () => {
+    await topup(1000);
+    expect((await pay(1000)).status).toBe(201);
+  });
+  test('different keys → separate credits', async () => {
+    await topup(100, 'a'); await topup(100, 'b');
+    expect((await request(app).get('/wallets/w1')).body.balance).toBe(200);
+  });
+  test('same key on another wallet is independent', async () => {
+    await topup(100, 'k', 'w1');
+    expect((await topup(100, 'k', 'w2')).status).toBe(201);
+  });
+  test('refund of an exact remaining amount is fine', async () => {
+    await topup(1000);
+    const p = await pay(600);
+    await request(app).post(`/payments/${p.body._id}/refund`).send({ amount: 200 });
+    expect((await request(app).post(`/payments/${p.body._id}/refund`).send({ amount: 400 })).status).toBe(201);
+  });
+});
+@@@ solution/src/wallet.js
+const db = require('memdb');
+const ledger = db.collection('ledger');
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+const positiveInt = (n) => Number.isInteger(n) && n > 0;
+
+async function balance(walletId) {
+  const entries = await ledger.find({ walletId });
+  return entries.reduce((s, e) => s + (e.type === 'debit' ? -e.amount : e.amount), 0);
+}
+
+async function topUp(walletId, amount, key) {
+  if (!positiveInt(amount)) throw new HttpError(400, 'amount must be a positive integer (paise)');
+  if (key) {
+    const existing = await ledger.findOne({ walletId, idempotencyKey: key });
+    if (existing) return { entry: existing, replay: true };
+  }
+  const entry = await ledger.insert({ walletId, type: 'credit', reason: 'topup', amount, idempotencyKey: key || null });
+  return { entry, replay: false };
+}
+
+async function pay(walletId, amount) {
+  if (!positiveInt(amount)) throw new HttpError(400, 'bad amount');
+  if ((await balance(walletId)) < amount) throw new HttpError(409, 'insufficient funds');
+  return ledger.insert({ walletId, type: 'debit', reason: 'payment', amount });
+}
+
+async function refund(paymentId, amount) {
+  if (!positiveInt(amount)) throw new HttpError(400, 'bad amount');
+  const payment = await ledger.findOne({ _id: paymentId, reason: 'payment' });
+  if (!payment) throw new HttpError(404, 'payment not found');
+  const refunds = await ledger.find({ paymentId, reason: 'refund' });
+  const already = refunds.reduce((s, r) => s + r.amount, 0);
+  if (already + amount > payment.amount) throw new HttpError(400, 'refund exceeds payment');
+  return ledger.insert({ walletId: payment.walletId, type: 'credit', reason: 'refund', paymentId, amount });
+}
+
+module.exports = { balance, topUp, pay, refund };

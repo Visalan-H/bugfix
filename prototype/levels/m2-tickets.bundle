@@ -1,0 +1,423 @@
+@@@ meta.json
+{
+  "id": "m2",
+  "difficulty": "medium",
+  "title": "Support desk: tickets & replies",
+  "minutes": 35,
+  "tagline": "Modelled on a reported Amazon campus OA: ticket thread app, ~6 failing tests, bugs that hide behind each other.",
+  "tags": ["error middleware", "route params", "enums", "boolean logic", "Promise.all"],
+  "lookFor": [
+    "A 500 where you expect a 404 usually means the error handler, not the service. Read src/middleware/errorHandler.js early.",
+    "Route says `:ticketId`, controller reads `req.params.id`? That's undefined.",
+    "Enum/status strings: compare the exact case that's stored ('closed' vs 'CLOSED').",
+    "Permission checks: write the rule in English first ('author OR agent may close'), then check the operator.",
+    "`array.map(async ...)` gives you an array of Promises. You need `await Promise.all(...)`."
+  ],
+  "bugs": [
+    {
+      "symptom": "Unknown ticket returns 500 instead of 404",
+      "file": "src/middleware/errorHandler.js",
+      "hints": [
+        "The service throws NotFoundError. Open src/errors.js. Which property holds the status?",
+        "Which property does the error handler read?"
+      ],
+      "cause": "`AppError` stores the code on `err.status`, but the handler reads `err.statusCode` → undefined → falls back to 500. Every typed error (400/403/404/409) shows up as 500.",
+      "fix": "`const status = err.status || 500;`",
+      "pattern": "Error middleware reads the wrong property"
+    },
+    {
+      "symptom": "Replying to a ticket says 'Ticket not found'",
+      "file": "src/controllers/ticketController.js",
+      "hints": [
+        "Compare the route path in src/routes/tickets.js with what addReply reads from req.params.",
+        "console.log(req.params) inside addReply."
+      ],
+      "cause": "The route is `/:ticketId/replies` but the controller reads `req.params.id` → `undefined` → no ticket found.",
+      "fix": "`service.addReply(req.params.ticketId, req.user, req.body.body)`",
+      "pattern": "Route param name mismatch"
+    },
+    {
+      "symptom": "Nobody can close a ticket (403)",
+      "file": "src/services/ticketService.js",
+      "hints": [
+        "Rule: the author OR an agent may close. Write the condition for 'forbidden'.",
+        "De Morgan: NOT (A OR B) is (NOT A) AND (NOT B)."
+      ],
+      "cause": "`authorId !== user.id || role !== 'agent'` is true for everyone except an agent who is also the author. The forbidden check needs `&&`.",
+      "fix": "`if (ticket.authorId !== user.id && user.role !== 'agent') throw new ForbiddenError(...)`",
+      "pattern": "Inverted boolean logic (|| vs &&)"
+    },
+    {
+      "symptom": "Closed tickets still accept replies",
+      "file": "src/services/ticketService.js",
+      "hints": [
+        "What exact string does closeTicket store in `status`? What does addReply compare against?"
+      ],
+      "cause": "closeTicket stores `'closed'`, addReply checks `=== 'CLOSED'`. The check never fires.",
+      "fix": "`if (ticket.status === 'closed')`, or better, a shared `STATUS.CLOSED` constant.",
+      "pattern": "Enum/case mismatch"
+    },
+    {
+      "symptom": "GET /tickets returns empty objects",
+      "file": "src/services/ticketService.js",
+      "hints": [
+        "Log what listTickets returns before res.json. What's inside the array?"
+      ],
+      "cause": "`tickets.map(async t => ...)` returns an array of Promises. JSON-serialising a Promise gives `{}`.",
+      "fix": "`return Promise.all(tickets.map(async (t) => ({ ...t, replyCount: await repo.countReplies(t._id) })));`",
+      "pattern": "async map without Promise.all"
+    }
+  ]
+}
+@@@ ticket.md
+# DESK-58: Support desk broke after a code clean-up
+
+After a "small refactor" of the error classes and routes, the support desk is broken.
+Customers open tickets, people reply in a thread, and the author or an **agent** closes them.
+
+## Auth
+`x-user-id` (required, else **401**). `x-role`: `agent` or `customer` (default `customer`).
+
+## API
+| Method | Path | Behaviour |
+|---|---|---|
+| `GET` | `/tickets?status=` | List tickets, each with `replyCount` |
+| `POST` | `/tickets` `{ title, description }` | **201** |
+| `GET` | `/tickets/:id` | Ticket + `replies` (oldest first). Unknown → **404** |
+| `POST` | `/tickets/:ticketId/replies` `{ body }` | **201**. Empty body → **400**. Closed ticket → **409** |
+| `POST` | `/tickets/:id/close` | Author **or** agent → **200** `{ status: 'closed' }`. Anyone else → **403** |
+
+Several bugs hide behind each other: fix one and the next test fails in a new way. That's normal.
+@@@ repo/package.json
+{
+  "name": "support-desk",
+  "version": "0.9.0",
+  "scripts": { "test": "jest" },
+  "dependencies": { "express": "^5.0.0", "memdb": "1.0.0" },
+  "devDependencies": { "jest": "^29.0.0", "supertest": "^7.0.0" }
+}
+@@@ repo/src/app.js
+const express = require('express');
+const auth = require('./middleware/auth');
+const errorHandler = require('./middleware/errorHandler');
+const ticketRoutes = require('./routes/tickets');
+
+const app = express();
+app.use(express.json());
+app.use(auth);
+app.use('/tickets', ticketRoutes);
+app.use(errorHandler);
+
+module.exports = app;
+@@@ repo/src/errors.js
+class AppError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = this.constructor.name;
+    this.status = status;
+  }
+}
+
+class ValidationError extends AppError { constructor(msg) { super(msg, 400); } }
+class ForbiddenError extends AppError { constructor(msg = 'Forbidden') { super(msg, 403); } }
+class NotFoundError extends AppError { constructor(what = 'Resource') { super(`${what} not found`, 404); } }
+class ConflictError extends AppError { constructor(msg) { super(msg, 409); } }
+
+module.exports = { AppError, ValidationError, ForbiddenError, NotFoundError, ConflictError };
+@@@ repo/src/middleware/auth.js
+module.exports = function auth(req, res, next) {
+  const id = req.get('x-user-id');
+  if (!id) return res.status(401).json({ error: 'unauthenticated' });
+  req.user = { id, role: req.get('x-role') || 'customer' };
+  next();
+};
+@@@ repo/src/middleware/errorHandler.js
+// Express error middleware: must take 4 args.
+module.exports = function errorHandler(err, req, res, next) {
+  const status = err.statusCode || 500;
+  if (status === 500) console.error(err);
+  res.status(status).json({ error: status === 500 ? 'Internal Server Error' : err.message });
+};
+@@@ repo/src/routes/tickets.js
+const express = require('express');
+const ctrl = require('../controllers/ticketController');
+
+const router = express.Router();
+
+router.get('/', ctrl.list);
+router.post('/', ctrl.create);
+router.get('/:id', ctrl.get);
+router.post('/:ticketId/replies', ctrl.addReply);
+router.post('/:id/close', ctrl.close);
+
+module.exports = router;
+@@@ repo/src/controllers/ticketController.js
+const service = require('../services/ticketService');
+
+exports.list = async (req, res) => {
+  const tickets = await service.listTickets({ status: req.query.status });
+  res.json(tickets);
+};
+
+exports.create = async (req, res) => {
+  const ticket = await service.createTicket(req.user, req.body);
+  res.status(201).json(ticket);
+};
+
+exports.get = async (req, res) => {
+  const ticket = await service.getTicket(req.params.id);
+  res.json(ticket);
+};
+
+exports.addReply = async (req, res) => {
+  const reply = await service.addReply(req.params.id, req.user, req.body.body);
+  res.status(201).json(reply);
+};
+
+exports.close = async (req, res) => {
+  const ticket = await service.closeTicket(req.params.id, req.user);
+  res.json(ticket);
+};
+@@@ repo/src/services/ticketService.js
+const repo = require('../repositories/ticketRepo');
+const { ValidationError, NotFoundError, ForbiddenError, ConflictError } = require('../errors');
+
+async function listTickets({ status }) {
+  const tickets = await repo.findTickets(status ? { status } : {});
+  return tickets.map(async (t) => ({ ...t, replyCount: await repo.countReplies(t._id) }));
+}
+
+async function createTicket(user, { title, description }) {
+  if (!title || !title.trim()) throw new ValidationError('title is required');
+  return repo.insertTicket({ title: title.trim(), description: description || '', authorId: user.id, status: 'open' });
+}
+
+async function getTicket(id) {
+  const ticket = await repo.findTicketById(id);
+  if (!ticket) throw new NotFoundError('Ticket');
+  const replies = await repo.findReplies(id);
+  return { ...ticket, replies };
+}
+
+async function addReply(ticketId, user, body) {
+  if (!body || !body.trim()) throw new ValidationError('reply body is required');
+  const ticket = await repo.findTicketById(ticketId);
+  if (!ticket) throw new NotFoundError('Ticket');
+  if (ticket.status === 'CLOSED') throw new ConflictError('ticket is closed');
+  return repo.insertReply({ ticketId, authorId: user.id, body: body.trim() });
+}
+
+async function closeTicket(id, user) {
+  const ticket = await repo.findTicketById(id);
+  if (!ticket) throw new NotFoundError('Ticket');
+  if (ticket.authorId !== user.id || user.role !== 'agent') {
+    throw new ForbiddenError('only the author or an agent can close this ticket');
+  }
+  return repo.updateTicket(id, { status: 'closed' });
+}
+
+module.exports = { listTickets, createTicket, getTicket, addReply, closeTicket };
+@@@ repo/src/repositories/ticketRepo.js
+const db = require('memdb');
+const tickets = db.collection('tickets');
+const replies = db.collection('replies');
+
+let seq = 0;
+
+exports.findTickets = (filter) => tickets.find(filter);
+exports.findTicketById = (id) => tickets.findById(id);
+exports.insertTicket = (doc) => tickets.insert(doc);
+exports.updateTicket = (id, patch) => tickets.updateById(id, patch);
+
+exports.insertReply = (doc) => replies.insert({ ...doc, seq: ++seq });
+exports.countReplies = (ticketId) => replies.count({ ticketId });
+exports.findReplies = async (ticketId) => {
+  const rows = await replies.find({ ticketId });
+  return rows.sort((a, b) => a.seq - b.seq);
+};
+@@@ repo/tests/tickets.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const as = (id, role = 'customer') => ({
+  get: (u) => request(app).get(u).set('x-user-id', id).set('x-role', role),
+  post: (u, b = {}) => request(app).post(u).set('x-user-id', id).set('x-role', role).send(b),
+});
+const cust = as('c1');
+const agent = as('a1', 'agent');
+
+async function newTicket() {
+  const r = await cust.post('/tickets', { title: 'Order not delivered', description: 'Order #123' });
+  return r.body._id;
+}
+
+describe('Support desk', () => {
+  test('unknown ticket is 404', async () => {
+    const res = await cust.get('/tickets/does-not-exist');
+    expect(res.status).toBe(404);
+  });
+
+  test('customer can reply to a ticket', async () => {
+    const id = await newTicket();
+    const res = await cust.post(`/tickets/${id}/replies`, { body: 'Any update?' });
+    expect(res.status).toBe(201);
+    const t = await cust.get(`/tickets/${id}`);
+    expect(t.body.replies).toHaveLength(1);
+    expect(t.body.replies[0].body).toBe('Any update?');
+  });
+
+  test('author can close their own ticket', async () => {
+    const id = await newTicket();
+    const res = await cust.post(`/tickets/${id}/close`);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('closed');
+  });
+
+  test('replying to a closed ticket is 409', async () => {
+    const id = await newTicket();
+    await agent.post(`/tickets/${id}/close`);
+    const res = await cust.post(`/tickets/${id}/replies`, { body: 'hello?' });
+    expect(res.status).toBe(409);
+  });
+
+  test('GET /tickets includes replyCount', async () => {
+    const id = await newTicket();
+    await agent.post(`/tickets/${id}/replies`, { body: 'Looking into it' });
+    const res = await cust.get('/tickets');
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].title).toBe('Order not delivered');
+    expect(res.body[0].replyCount).toBe(1);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const as = (id, role = 'customer') => ({
+  get: (u) => request(app).get(u).set('x-user-id', id).set('x-role', role),
+  post: (u, b = {}) => request(app).post(u).set('x-user-id', id).set('x-role', role).send(b),
+});
+const cust = as('c1');
+const stranger = as('c2');
+const agent = as('a1', 'agent');
+
+async function newTicket() {
+  const r = await cust.post('/tickets', { title: 'Refund', description: '' });
+  return r.body._id;
+}
+
+describe('hidden', () => {
+  test('a stranger cannot close someone else\'s ticket (403)', async () => {
+    const id = await newTicket();
+    const res = await stranger.post(`/tickets/${id}/close`);
+    expect(res.status).toBe(403);
+  });
+
+  test('an agent can close any ticket', async () => {
+    const id = await newTicket();
+    const res = await agent.post(`/tickets/${id}/close`);
+    expect(res.status).toBe(200);
+  });
+
+  test('empty reply is 400', async () => {
+    const id = await newTicket();
+    const res = await cust.post(`/tickets/${id}/replies`, { body: '   ' });
+    expect(res.status).toBe(400);
+  });
+
+  test('replies come back oldest first', async () => {
+    const id = await newTicket();
+    await cust.post(`/tickets/${id}/replies`, { body: 'one' });
+    await agent.post(`/tickets/${id}/replies`, { body: 'two' });
+    await cust.post(`/tickets/${id}/replies`, { body: 'three' });
+    const t = await cust.get(`/tickets/${id}`);
+    expect(t.body.replies.map((r) => r.body)).toEqual(['one', 'two', 'three']);
+  });
+
+  test('status filter', async () => {
+    const a = await newTicket();
+    await newTicket();
+    await agent.post(`/tickets/${a}/close`);
+    const res = await cust.get('/tickets?status=open');
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].replyCount).toBe(0);
+  });
+
+  test('missing x-user-id is 401', async () => {
+    const res = await request(app).get('/tickets');
+    expect(res.status).toBe(401);
+  });
+});
+@@@ solution/src/middleware/errorHandler.js
+// Express error middleware: must take 4 args.
+module.exports = function errorHandler(err, req, res, next) {
+  const status = err.status || 500;
+  if (status === 500) console.error(err);
+  res.status(status).json({ error: status === 500 ? 'Internal Server Error' : err.message });
+};
+@@@ solution/src/controllers/ticketController.js
+const service = require('../services/ticketService');
+
+exports.list = async (req, res) => {
+  const tickets = await service.listTickets({ status: req.query.status });
+  res.json(tickets);
+};
+
+exports.create = async (req, res) => {
+  const ticket = await service.createTicket(req.user, req.body);
+  res.status(201).json(ticket);
+};
+
+exports.get = async (req, res) => {
+  const ticket = await service.getTicket(req.params.id);
+  res.json(ticket);
+};
+
+exports.addReply = async (req, res) => {
+  const reply = await service.addReply(req.params.ticketId, req.user, req.body.body);
+  res.status(201).json(reply);
+};
+
+exports.close = async (req, res) => {
+  const ticket = await service.closeTicket(req.params.id, req.user);
+  res.json(ticket);
+};
+@@@ solution/src/services/ticketService.js
+const repo = require('../repositories/ticketRepo');
+const { ValidationError, NotFoundError, ForbiddenError, ConflictError } = require('../errors');
+
+async function listTickets({ status }) {
+  const tickets = await repo.findTickets(status ? { status } : {});
+  return Promise.all(tickets.map(async (t) => ({ ...t, replyCount: await repo.countReplies(t._id) })));
+}
+
+async function createTicket(user, { title, description }) {
+  if (!title || !title.trim()) throw new ValidationError('title is required');
+  return repo.insertTicket({ title: title.trim(), description: description || '', authorId: user.id, status: 'open' });
+}
+
+async function getTicket(id) {
+  const ticket = await repo.findTicketById(id);
+  if (!ticket) throw new NotFoundError('Ticket');
+  const replies = await repo.findReplies(id);
+  return { ...ticket, replies };
+}
+
+async function addReply(ticketId, user, body) {
+  if (!body || !body.trim()) throw new ValidationError('reply body is required');
+  const ticket = await repo.findTicketById(ticketId);
+  if (!ticket) throw new NotFoundError('Ticket');
+  if (ticket.status === 'closed') throw new ConflictError('ticket is closed');
+  return repo.insertReply({ ticketId, authorId: user.id, body: body.trim() });
+}
+
+async function closeTicket(id, user) {
+  const ticket = await repo.findTicketById(id);
+  if (!ticket) throw new NotFoundError('Ticket');
+  if (ticket.authorId !== user.id && user.role !== 'agent') {
+    throw new ForbiddenError('only the author or an agent can close this ticket');
+  }
+  return repo.updateTicket(id, { status: 'closed' });
+}
+
+module.exports = { listTickets, createTicket, getTicket, addReply, closeTicket };

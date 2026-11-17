@@ -1,0 +1,198 @@
+@@@ meta.json
+{
+  "id": "m5",
+  "difficulty": "medium",
+  "title": "Bank transfers",
+  "minutes": 30,
+  "tagline": "Negative transfers steal money, ownership is checked on the wrong account, and money vanishes into unknown accounts.",
+  "tags": ["validation", "authorization", "partial writes", "money"],
+  "lookFor": [
+    "Money endpoints: amount must be a positive number. `!amount` lets negatives through.",
+    "Authorization: check the caller owns the account money LEAVES. Read which variable the check uses.",
+    "Validate everything (both accounts exist, funds, ownership) BEFORE the first write.",
+    "Self-transfer, zero, NaN, unknown accounts: these are the hidden tests."
+  ],
+  "bugs": [
+    {
+      "symptom": "A negative amount moves money backwards",
+      "file": "src/transferService.js",
+      "hints": ["What does `!(-100)` evaluate to?"],
+      "cause": "`if (!amount)` only rejects 0/undefined. A negative amount passes, which debits the receiver and credits the sender: theft.",
+      "fix": "`if (typeof amount !== 'number' || !(amount > 0)) throw new HttpError(400, ...)`",
+      "pattern": "Missing negative check"
+    },
+    {
+      "symptom": "Users can transfer from someone else's account",
+      "file": "src/transferService.js",
+      "hints": ["Which account does the ownership check look at?"],
+      "cause": "Ownership is checked on `to` instead of `from`, so anyone can drain an account by sending money to themselves.",
+      "fix": "`if (from.owner !== userId) throw new HttpError(403, ...)`",
+      "pattern": "Authorization on the wrong object"
+    },
+    {
+      "symptom": "Transfer to an unknown account loses the money",
+      "file": "src/transferService.js",
+      "hints": ["When is `to` looked up: before or after the debit?"],
+      "cause": "The sender is debited before the receiver is looked up. If `to` doesn't exist the call 404s, but the debit already happened.",
+      "fix": "Load and validate both accounts first, then debit and credit.",
+      "pattern": "Write before validate"
+    },
+    {
+      "symptom": "(hidden) Self-transfer is allowed",
+      "file": "src/transferService.js",
+      "hints": ["What if from === to?"],
+      "cause": "No check, so a self-transfer creates noise transactions (and in some systems double-counts).",
+      "fix": "`if (fromId === toId) throw new HttpError(400, 'cannot transfer to the same account')`",
+      "pattern": "Missing edge-case validation"
+    }
+  ]
+}
+@@@ ticket.md
+# BANK-404: Money is disappearing
+
+`POST /transfers { from, to, amount }` (header `x-user-id`)
+
+* `amount` must be a number > 0 → else **400**. `from === to` → **400**.
+* Caller must own `from` → else **403**.
+* Unknown `from`/`to` → **404**. Not enough balance → **409**.
+* On any error, **no balance changes**.
+* `GET /accounts/:id` → `{ id, owner, balance }`
+
+Seed: `acc-a` (owner u1, ₹1000), `acc-b` (owner u2, ₹500).
+@@@ repo/package.json
+{ "name": "bank", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/app.js
+const express = require('express');
+const svc = require('./transferService');
+
+const app = express();
+app.use(express.json());
+
+app.get('/accounts/:id', async (req, res) => res.json(await svc.getAccount(req.params.id)));
+app.post('/transfers', async (req, res) => {
+  const { from, to, amount } = req.body;
+  res.status(201).json(await svc.transfer(req.get('x-user-id'), from, to, amount));
+});
+app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
+
+module.exports = app;
+@@@ repo/src/transferService.js
+const db = require('memdb');
+const accounts = db.collection('accounts');
+
+const ready = Promise.all([
+  accounts.insert({ _id: 'acc-a', owner: 'u1', balance: 1000 }),
+  accounts.insert({ _id: 'acc-b', owner: 'u2', balance: 500 }),
+]);
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+async function getAccount(id) {
+  await ready;
+  const a = await accounts.findById(id);
+  if (!a) throw new HttpError(404, 'account not found');
+  return { id: a._id, owner: a.owner, balance: a.balance };
+}
+
+async function transfer(userId, fromId, toId, amount) {
+  if (!amount) throw new HttpError(400, 'amount is required');
+
+  const from = await getAccount(fromId);
+  if (from.balance < amount) throw new HttpError(409, 'insufficient funds');
+  await accounts.findOneAndUpdate({ _id: fromId }, { $inc: { balance: -amount } });
+
+  const to = await getAccount(toId);
+  if (to.owner !== userId) throw new HttpError(403, 'not your account');
+  await accounts.findOneAndUpdate({ _id: toId }, { $inc: { balance: amount } });
+
+  return { from: fromId, to: toId, amount };
+}
+
+module.exports = { getAccount, transfer };
+@@@ repo/tests/transfers.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const transfer = (user, body) => request(app).post('/transfers').set('x-user-id', user).send(body);
+const balance = async (id) => (await request(app).get(`/accounts/${id}`)).body.balance;
+
+describe('Transfers', () => {
+  test('a normal transfer', async () => {
+    const res = await transfer('u1', { from: 'acc-a', to: 'acc-b', amount: 200 });
+    expect(res.status).toBe(201);
+    expect(await balance('acc-a')).toBe(800);
+    expect(await balance('acc-b')).toBe(700);
+  });
+  test('negative amount → 400', async () => {
+    expect((await transfer('u1', { from: 'acc-a', to: 'acc-b', amount: -100 })).status).toBe(400);
+    expect(await balance('acc-a')).toBe(1000);
+  });
+  test('cannot send from someone else\'s account', async () => {
+    expect((await transfer('u1', { from: 'acc-b', to: 'acc-a', amount: 100 })).status).toBe(403);
+    expect(await balance('acc-b')).toBe(500);
+  });
+  test('unknown receiver → 404 and nothing is debited', async () => {
+    expect((await transfer('u1', { from: 'acc-a', to: 'acc-zzz', amount: 100 })).status).toBe(404);
+    expect(await balance('acc-a')).toBe(1000);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const transfer = (user, body) => request(app).post('/transfers').set('x-user-id', user).send(body);
+const balance = async (id) => (await request(app).get(`/accounts/${id}`)).body.balance;
+
+describe('hidden', () => {
+  test('self-transfer → 400', async () => {
+    expect((await transfer('u1', { from: 'acc-a', to: 'acc-a', amount: 10 })).status).toBe(400);
+  });
+  test('insufficient funds → 409, no change', async () => {
+    expect((await transfer('u2', { from: 'acc-b', to: 'acc-a', amount: 501 })).status).toBe(409);
+    expect(await balance('acc-a')).toBe(1000);
+  });
+  test('string amount → 400', async () => {
+    expect((await transfer('u1', { from: 'acc-a', to: 'acc-b', amount: '100' })).status).toBe(400);
+  });
+  test('exact balance is allowed', async () => {
+    expect((await transfer('u2', { from: 'acc-b', to: 'acc-a', amount: 500 })).status).toBe(201);
+    expect(await balance('acc-b')).toBe(0);
+  });
+  test('unknown sender → 404', async () => {
+    expect((await transfer('u1', { from: 'acc-x', to: 'acc-a', amount: 5 })).status).toBe(404);
+  });
+});
+@@@ solution/src/transferService.js
+const db = require('memdb');
+const accounts = db.collection('accounts');
+
+const ready = Promise.all([
+  accounts.insert({ _id: 'acc-a', owner: 'u1', balance: 1000 }),
+  accounts.insert({ _id: 'acc-b', owner: 'u2', balance: 500 }),
+]);
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+async function getAccount(id) {
+  await ready;
+  const a = await accounts.findById(id);
+  if (!a) throw new HttpError(404, 'account not found');
+  return { id: a._id, owner: a.owner, balance: a.balance };
+}
+
+async function transfer(userId, fromId, toId, amount) {
+  if (typeof amount !== 'number' || !(amount > 0)) throw new HttpError(400, 'amount must be a positive number');
+  if (fromId === toId) throw new HttpError(400, 'cannot transfer to the same account');
+
+  const from = await getAccount(fromId);
+  const to = await getAccount(toId);
+  if (from.owner !== userId) throw new HttpError(403, 'not your account');
+
+  const debited = await accounts.findOneAndUpdate({ _id: fromId, balance: { $gte: amount } }, { $inc: { balance: -amount } });
+  if (!debited) throw new HttpError(409, 'insufficient funds');
+  await accounts.findOneAndUpdate({ _id: to.id }, { $inc: { balance: amount } });
+
+  return { from: fromId, to: toId, amount };
+}
+
+module.exports = { getAccount, transfer };

@@ -1,0 +1,135 @@
+@@@ meta.json
+{
+  "id": "e12",
+  "difficulty": "easy",
+  "title": "Warehouse low-stock report",
+  "minutes": 15,
+  "tagline": "Stock counts stored as strings: '9' is not <= '10', 0 means 'use the default', and totals concatenate.",
+  "tags": ["string comparison", "|| vs ??", "concatenation"],
+  "lookFor": [
+    "Data from CSVs and spreadsheets is strings. String `<=` compares character by character, so '9' > '10'.",
+    "`x || 5` replaces 0 with 5. If 0 is a valid value, use `??` (or check undefined explicitly).",
+    "`sum + '9'` is string concatenation. Convert first."
+  ],
+  "bugs": [
+    {
+      "symptom": "Item with 9 units missing from the threshold=10 report",
+      "file": "src/report.js",
+      "hints": ["What type is `item.stock`? And `threshold` from the query?", "Is `'9' <= '10'` true?"],
+      "cause": "Both sides are strings, so the comparison is lexicographic: '9' > '10' because '9' > '1'.",
+      "fix": "`Number(item.stock) <= threshold` with `threshold` parsed to a number",
+      "pattern": "String comparison of numbers"
+    },
+    {
+      "symptom": "threshold=0 returns items with stock up to 5",
+      "file": "src/report.js",
+      "hints": ["What is `'0' || 5`? And `Number('0') || 5`?"],
+      "cause": "The code converts to a number and then uses `|| DEFAULT`. 0 is falsy, so it becomes 5.",
+      "fix": "`const threshold = raw === undefined ? DEFAULT : Number(raw);` (or `??` before converting)",
+      "pattern": "|| swallows 0"
+    },
+    {
+      "symptom": "totalUnits is '0391'",
+      "file": "src/report.js",
+      "hints": ["Look at the reduce. What's `0 + '0'`?"],
+      "cause": "Adding string stock values concatenates them.",
+      "fix": "`s + Number(i.stock)`",
+      "pattern": "String concatenation with +"
+    }
+  ]
+}
+@@@ ticket.md
+# WH-14: Low-stock report misses items
+
+`GET /reports/low-stock?threshold=` → `{ items, totalUnits }`
+
+* Items with `stock <= threshold`, sorted by stock ascending. Default threshold **5**. `threshold=0` → only out-of-stock items.
+* `totalUnits` = sum of stock of the listed items (a number).
+* `stock` in `inventory.js` comes from a CSV import and stays a string in the data. Respond with whatever you like for `stock`, but `totalUnits` must be a number.
+@@@ repo/package.json
+{ "name": "warehouse", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/inventory.js
+// Imported from the supplier CSV. Every value is a string.
+module.exports = [
+  { sku: 'A', name: 'Bubble wrap', stock: '9' },
+  { sku: 'B', name: 'Tape', stock: '12' },
+  { sku: 'C', name: 'Boxes (S)', stock: '100' },
+  { sku: 'D', name: 'Boxes (L)', stock: '0' },
+  { sku: 'E', name: 'Labels', stock: '3' },
+  { sku: 'F', name: 'Markers', stock: '10' },
+];
+@@@ repo/src/report.js
+const inventory = require('./inventory');
+
+const DEFAULT = 5;
+
+function lowStock(rawThreshold) {
+  const threshold = Number(rawThreshold) || DEFAULT;
+  const items = inventory
+    .filter((i) => i.stock <= String(threshold))
+    .sort((a, b) => a.stock - b.stock);
+  const totalUnits = items.reduce((s, i) => s + i.stock, 0);
+  return { items, totalUnits };
+}
+
+module.exports = { lowStock };
+@@@ repo/src/app.js
+const express = require('express');
+const { lowStock } = require('./report');
+
+const app = express();
+app.get('/reports/low-stock', (req, res) => res.json(lowStock(req.query.threshold)));
+
+module.exports = app;
+@@@ repo/tests/report.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const skus = (res) => res.body.items.map((i) => i.sku);
+
+describe('Low stock', () => {
+  test('threshold=10', async () => {
+    const res = await request(app).get('/reports/low-stock?threshold=10');
+    expect(skus(res)).toEqual(['D', 'E', 'A', 'F']);
+    expect(res.body.totalUnits).toBe(22);
+  });
+  test('default threshold 5', async () => {
+    const res = await request(app).get('/reports/low-stock');
+    expect(skus(res)).toEqual(['D', 'E']);
+    expect(res.body.totalUnits).toBe(3);
+  });
+  test('threshold=0 → only out of stock', async () => {
+    const res = await request(app).get('/reports/low-stock?threshold=0');
+    expect(skus(res)).toEqual(['D']);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+describe('hidden', () => {
+  test('threshold=100 includes everything', async () => {
+    const res = await request(app).get('/reports/low-stock?threshold=100');
+    expect(res.body.items).toHaveLength(6);
+    expect(res.body.totalUnits).toBe(134);
+  });
+  test('threshold=12', async () => {
+    const res = await request(app).get('/reports/low-stock?threshold=12');
+    expect(res.body.items.map((i) => i.sku)).toEqual(['D', 'E', 'A', 'F', 'B']);
+  });
+});
+@@@ solution/src/report.js
+const inventory = require('./inventory');
+
+const DEFAULT = 5;
+
+function lowStock(rawThreshold) {
+  const threshold = rawThreshold === undefined || rawThreshold === '' ? DEFAULT : Number(rawThreshold);
+  const items = inventory
+    .filter((i) => Number(i.stock) <= threshold)
+    .sort((a, b) => Number(a.stock) - Number(b.stock));
+  const totalUnits = items.reduce((s, i) => s + Number(i.stock), 0);
+  return { items, totalUnits };
+}
+
+module.exports = { lowStock };

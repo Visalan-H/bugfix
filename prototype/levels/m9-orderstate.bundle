@@ -1,0 +1,215 @@
+@@@ meta.json
+{
+  "id": "m9",
+  "difficulty": "medium",
+  "title": "Order state machine",
+  "minutes": 30,
+  "tagline": "Transitions are checked backwards, a missing header grants staff powers, and responses show the old status.",
+  "tags": ["state machines", "insecure defaults", "stale responses"],
+  "lookFor": [
+    "Transition tables are keyed by the CURRENT state: `ALLOWED[current].includes(next)`.",
+    "Defaults for auth/role headers must be the LEAST privileged option.",
+    "After an update, respond with what the DB returned, not the object you loaded before.",
+    "Unknown enum values should be a 400, not a crash or a 409."
+  ],
+  "bugs": [
+    {
+      "symptom": "placed → paid is rejected",
+      "file": "src/orders.js",
+      "hints": ["Read the lookup: `ALLOWED[to].includes(order.status)`. Which state is the key?"],
+      "cause": "The table is read backwards: it asks 'can `to` move to the current status?' instead of 'can the current status move to `to`?'.",
+      "fix": "`ALLOWED[order.status].includes(to)`",
+      "pattern": "Transition table read backwards"
+    },
+    {
+      "symptom": "Requests without x-role can ship orders",
+      "file": "src/app.js",
+      "hints": ["What role does a request with no header get?"],
+      "cause": "`req.get('x-role') || 'staff'` grants staff by default.",
+      "fix": "Default to `'customer'`.",
+      "pattern": "Insecure default"
+    },
+    {
+      "symptom": "Response shows the previous status",
+      "file": "src/orders.js",
+      "hints": ["Which object is returned after the update?"],
+      "cause": "The handler returns the order loaded before the update.",
+      "fix": "`return orders.updateById(id, …)` (use its return value)",
+      "pattern": "Stale response object"
+    },
+    {
+      "symptom": "(hidden) to='teleported' → 500",
+      "file": "src/orders.js",
+      "hints": ["What is `ALLOWED['teleported']`?"],
+      "cause": "Unknown target states aren't validated, so the lookup is undefined and throws.",
+      "fix": "`if (!(to in ALLOWED)) throw new HttpError(400, 'unknown status')`",
+      "pattern": "Unvalidated enum"
+    }
+  ]
+}
+@@@ ticket.md
+# ORD-77: Order status updates broken
+
+`POST /orders/:id/transition { to }` (headers `x-user-id`, `x-role`: `customer` | `staff`, default **customer**)
+
+```
+placed → paid → shipped → delivered
+placed → cancelled,  paid → cancelled
+```
+* Customers may only move to `cancelled`. Staff may do any allowed transition. Else **403**.
+* Not allowed from the current status → **409**. Unknown status → **400**.
+* Response: the **updated** order.
+
+`POST /orders` creates an order in `placed`.
+@@@ repo/package.json
+{ "name": "orders", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/orders.js
+const db = require('memdb');
+const orders = db.collection('orders');
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+const ALLOWED = {
+  placed: ['paid', 'cancelled'],
+  paid: ['shipped', 'cancelled'],
+  shipped: ['delivered'],
+  delivered: [],
+  cancelled: [],
+};
+
+async function create(userId) {
+  return orders.insert({ userId, status: 'placed', history: ['placed'] });
+}
+
+async function transition(id, to, role) {
+  const order = await orders.findById(id);
+  if (!order) throw new HttpError(404, 'order not found');
+  if (role !== 'staff' && to !== 'cancelled') throw new HttpError(403, 'customers can only cancel');
+  if (!ALLOWED[to].includes(order.status)) throw new HttpError(409, `cannot go from ${order.status} to ${to}`);
+  await orders.updateById(id, { status: to, history: [...order.history, to] });
+  return order;
+}
+
+module.exports = { create, transition };
+@@@ repo/src/app.js
+const express = require('express');
+const svc = require('./orders');
+
+const app = express();
+app.use(express.json());
+app.use((req, res, next) => {
+  req.userId = req.get('x-user-id');
+  req.role = req.get('x-role') || 'staff';
+  next();
+});
+app.post('/orders', async (req, res) => res.status(201).json(await svc.create(req.userId)));
+app.post('/orders/:id/transition', async (req, res) => {
+  res.json(await svc.transition(req.params.id, req.body.to, req.role));
+});
+app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
+
+module.exports = app;
+@@@ repo/tests/orders.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const create = () => request(app).post('/orders').set('x-user-id', 'u1');
+const move = (id, to, role) => {
+  const r = request(app).post(`/orders/${id}/transition`).set('x-user-id', 'u1');
+  if (role) r.set('x-role', role);
+  return r.send({ to });
+};
+
+describe('Order transitions', () => {
+  test('staff: placed → paid → shipped', async () => {
+    const o = await create();
+    const paid = await move(o.body._id, 'paid', 'staff');
+    expect(paid.status).toBe(200);
+    expect(paid.body.status).toBe('paid');
+    const shipped = await move(o.body._id, 'shipped', 'staff');
+    expect(shipped.body.history).toEqual(['placed', 'paid', 'shipped']);
+  });
+  test('no role header = customer, cannot ship', async () => {
+    const o = await create();
+    await move(o.body._id, 'paid', 'staff');
+    expect((await move(o.body._id, 'shipped')).status).toBe(403);
+  });
+  test('cannot cancel after shipping', async () => {
+    const o = await create();
+    await move(o.body._id, 'paid', 'staff');
+    await move(o.body._id, 'shipped', 'staff');
+    expect((await move(o.body._id, 'cancelled', 'customer')).status).toBe(409);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const create = () => request(app).post('/orders').set('x-user-id', 'u1');
+const move = (id, to, role = 'staff') => request(app).post(`/orders/${id}/transition`).set('x-role', role).send({ to });
+
+describe('hidden', () => {
+  test('unknown status → 400', async () => {
+    const o = await create();
+    expect((await move(o.body._id, 'teleported')).status).toBe(400);
+  });
+  test('customer can cancel a placed order', async () => {
+    const o = await create();
+    const res = await move(o.body._id, 'cancelled', 'customer');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('cancelled');
+  });
+  test('skipping a state → 409', async () => {
+    const o = await create();
+    expect((await move(o.body._id, 'delivered')).status).toBe(409);
+  });
+  test('unknown order → 404', async () => {
+    expect((await move('nope', 'paid')).status).toBe(404);
+  });
+});
+@@@ solution/src/orders.js
+const db = require('memdb');
+const orders = db.collection('orders');
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+const ALLOWED = {
+  placed: ['paid', 'cancelled'],
+  paid: ['shipped', 'cancelled'],
+  shipped: ['delivered'],
+  delivered: [],
+  cancelled: [],
+};
+
+async function create(userId) {
+  return orders.insert({ userId, status: 'placed', history: ['placed'] });
+}
+
+async function transition(id, to, role) {
+  if (!Object.prototype.hasOwnProperty.call(ALLOWED, to)) throw new HttpError(400, 'unknown status');
+  const order = await orders.findById(id);
+  if (!order) throw new HttpError(404, 'order not found');
+  if (role !== 'staff' && to !== 'cancelled') throw new HttpError(403, 'customers can only cancel');
+  if (!ALLOWED[order.status].includes(to)) throw new HttpError(409, `cannot go from ${order.status} to ${to}`);
+  return orders.updateById(id, { status: to, history: [...order.history, to] });
+}
+
+module.exports = { create, transition };
+@@@ solution/src/app.js
+const express = require('express');
+const svc = require('./orders');
+
+const app = express();
+app.use(express.json());
+app.use((req, res, next) => {
+  req.userId = req.get('x-user-id');
+  req.role = req.get('x-role') || 'customer';
+  next();
+});
+app.post('/orders', async (req, res) => res.status(201).json(await svc.create(req.userId)));
+app.post('/orders/:id/transition', async (req, res) => {
+  res.json(await svc.transition(req.params.id, req.body.to, req.role));
+});
+app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
+
+module.exports = app;

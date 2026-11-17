@@ -1,0 +1,204 @@
+@@@ meta.json
+{
+  "id": "h10",
+  "difficulty": "hard",
+  "title": "CSV customer import",
+  "minutes": 40,
+  "tagline": "Quoted commas break rows, error line numbers are off, '1,200' imports as 1, and duplicates slip in.",
+  "tags": ["parsing", "line numbers", "number formats", "dedupe"],
+  "lookFor": [
+    "`line.split(',')` breaks on commas inside quotes. CSV needs a tiny state machine.",
+    "Error line numbers should be what a human sees in the file: 1-based, header included.",
+    "`parseInt('1,200')` is 1. Strip separators, then use `Number()` and check for NaN.",
+    "Dedupe on a normalised key (lowercase email), both within the file AND against the DB."
+  ],
+  "bugs": [
+    {
+      "symptom": "\"Shah, Ankit\" splits into two columns",
+      "file": "src/csv.js",
+      "hints": ["How does parseLine split fields?"],
+      "cause": "A naive `split(',')` ignores quoting.",
+      "fix": "Walk the characters, toggling `inQuotes` on `\"` (treat `\"\"` as an escaped quote) and splitting on commas only outside quotes.",
+      "pattern": "Naive CSV split"
+    },
+    {
+      "symptom": "Error says line 1 for the first data row",
+      "file": "src/importer.js",
+      "hints": ["The header is line 1. What is the index of the first data row in `rows`?"],
+      "cause": "The 0-based index of the data rows is used, so the reported line is off by 2.",
+      "fix": "`line: i + 2` (+1 for 1-based, +1 for the header)",
+      "pattern": "Off-by-one line numbers"
+    },
+    {
+      "symptom": "Amount \"1,200\" imports as 1",
+      "file": "src/importer.js",
+      "hints": ["What does parseInt do when it hits a comma?"],
+      "cause": "`parseInt` stops at the first non-digit.",
+      "fix": "`const amount = Number(raw.replace(/,/g, '')); if (!Number.isFinite(amount)) → error`",
+      "pattern": "parseInt truncation"
+    },
+    {
+      "symptom": "(hidden) Same email twice / blank lines",
+      "file": "src/importer.js",
+      "hints": ["Is there a seen-set? What does a trailing newline produce?"],
+      "cause": "Duplicates (case-insensitive) aren't skipped, and blank lines become error rows.",
+      "fix": "Skip empty lines; keep a `Set` of lowercased emails, count repeats as `skipped`.",
+      "pattern": "Dedupe + blank lines"
+    }
+  ]
+}
+@@@ ticket.md
+# CRM-12: Import mangles customer files
+
+`POST /import { csv }` → `{ imported, skipped, errors: [{ line, reason }] }`; `GET /customers` lists imported rows.
+
+* Header: `name,email,amount`. Fields may be quoted (`"Shah, Ankit"`); `""` inside quotes is a literal quote.
+* `amount` may contain thousands separators (`"1,200"`). Non-numeric → error row.
+* `line` = the **file** line number (header = line 1).
+* Blank lines are ignored. Repeated emails (case-insensitive) → counted in `skipped`, first one wins.
+@@@ repo/package.json
+{ "name": "crm-import", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/csv.js
+function parseLine(line) {
+  return line.split(',').map((f) => f.trim());
+}
+
+module.exports = { parseLine };
+@@@ repo/src/importer.js
+const db = require('memdb');
+const { parseLine } = require('./csv');
+
+const customers = db.collection('customers');
+
+async function importCsv(text) {
+  const [header, ...rows] = String(text).split('\n');
+  const result = { imported: 0, skipped: 0, errors: [] };
+
+  for (let i = 0; i < rows.length; i++) {
+    const [name, email, rawAmount] = parseLine(rows[i]);
+    if (!name || !email || !email.includes('@')) {
+      result.errors.push({ line: i, reason: 'name and a valid email are required' });
+      continue;
+    }
+    const amount = parseInt(rawAmount, 10);
+    if (Number.isNaN(amount)) {
+      result.errors.push({ line: i, reason: 'amount is not a number' });
+      continue;
+    }
+    await customers.insert({ name, email: email.toLowerCase(), amount });
+    result.imported++;
+  }
+  return result;
+}
+
+module.exports = { importCsv, customers };
+@@@ repo/src/app.js
+const express = require('express');
+const { importCsv, customers } = require('./importer');
+
+const app = express();
+app.use(express.json());
+app.post('/import', async (req, res) => res.json(await importCsv(req.body.csv)));
+app.get('/customers', async (req, res) => res.json(await customers.find({})));
+
+module.exports = app;
+@@@ repo/tests/import.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const imp = (csv) => request(app).post('/import').send({ csv });
+
+describe('CSV import', () => {
+  test('quoted commas stay in one field', async () => {
+    await imp('name,email,amount\n"Shah, Ankit",ankit@x.com,500');
+    const c = (await request(app).get('/customers')).body[0];
+    expect(c.name).toBe('Shah, Ankit');
+    expect(c.amount).toBe(500);
+  });
+  test('thousands separators', async () => {
+    await imp('name,email,amount\nMeena,meena@x.com,"1,200"');
+    expect((await request(app).get('/customers')).body[0].amount).toBe(1200);
+  });
+  test('error line numbers match the file', async () => {
+    const res = await imp('name,email,amount\nOk,ok@x.com,10\nBad,not-an-email,10');
+    expect(res.body.errors).toEqual([{ line: 3, reason: 'name and a valid email are required' }]);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const imp = (csv) => request(app).post('/import').send({ csv });
+
+describe('hidden', () => {
+  test('blank lines ignored, trailing newline ok', async () => {
+    const res = await imp('name,email,amount\nA,a@x.com,1\n\nB,b@x.com,2\n');
+    expect(res.body).toEqual({ imported: 2, skipped: 0, errors: [] });
+  });
+  test('duplicate emails are skipped (case-insensitive)', async () => {
+    const res = await imp('name,email,amount\nA,a@x.com,1\nA2,A@X.com,2');
+    expect(res.body).toMatchObject({ imported: 1, skipped: 1 });
+  });
+  test('escaped quotes', async () => {
+    await imp('name,email,amount\n"The ""Boss""",boss@x.com,1');
+    expect((await request(app).get('/customers')).body[0].name).toBe('The "Boss"');
+  });
+  test('"12abc" is not a number', async () => {
+    const res = await imp('name,email,amount\nA,a@x.com,12abc');
+    expect(res.body.errors).toEqual([{ line: 2, reason: 'amount is not a number' }]);
+  });
+});
+@@@ solution/src/csv.js
+function parseLine(line) {
+  const out = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuotes) {
+      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else cur += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { out.push(cur.trim()); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+module.exports = { parseLine };
+@@@ solution/src/importer.js
+const db = require('memdb');
+const { parseLine } = require('./csv');
+
+const customers = db.collection('customers');
+
+async function importCsv(text) {
+  const [header, ...rows] = String(text).replace(/\r/g, '').split('\n');
+  const result = { imported: 0, skipped: 0, errors: [] };
+  const seen = new Set();
+
+  for (let i = 0; i < rows.length; i++) {
+    if (!rows[i].trim()) continue;
+    const line = i + 2;
+    const [name, email, rawAmount] = parseLine(rows[i]);
+    if (!name || !email || !email.includes('@')) {
+      result.errors.push({ line, reason: 'name and a valid email are required' });
+      continue;
+    }
+    const amount = Number(String(rawAmount || '').replace(/,/g, ''));
+    if (rawAmount === undefined || rawAmount === '' || !Number.isFinite(amount)) {
+      result.errors.push({ line, reason: 'amount is not a number' });
+      continue;
+    }
+    const key = email.toLowerCase();
+    if (seen.has(key) || (await customers.findOne({ email: key }))) { result.skipped++; continue; }
+    seen.add(key);
+    await customers.insert({ name, email: key, amount });
+    result.imported++;
+  }
+  return result;
+}
+
+module.exports = { importCsv, customers };

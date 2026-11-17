@@ -1,0 +1,206 @@
+@@@ meta.json
+{
+  "id": "m14",
+  "difficulty": "medium",
+  "title": "Polls & voting",
+  "minutes": 25,
+  "tagline": "A typo'd field name allows unlimited votes, percentages round down, closed polls stay open, and anyone can invent an option.",
+  "tags": ["field-name typos", "rounding", "date strings", "whitelists"],
+  "lookFor": [
+    "Field-name typos in filters (`userID` vs `userId`) match nothing, silently.",
+    "Rounding rule: 'nearest' is `Math.round`. `Math.floor` biases down.",
+    "Comparing an ISO date STRING with a number is always false. Parse with `Date.parse`.",
+    "User-chosen keys (option names) must be checked against a whitelist."
+  ],
+  "bugs": [
+    {
+      "symptom": "Same user can vote many times",
+      "file": "src/polls.js",
+      "hints": ["Compare the field name used in `findOne` with the one used in `insert`."],
+      "cause": "The duplicate check looks up `userID` but votes are stored with `userId`, so it never finds an existing vote.",
+      "fix": "`votes.findOne({ pollId, userId })`",
+      "pattern": "Field-name typo in a filter"
+    },
+    {
+      "symptom": "2-vs-1 shows 66% / 33%",
+      "file": "src/polls.js",
+      "hints": ["Spec: nearest integer."],
+      "cause": "`Math.floor` always rounds down.",
+      "fix": "`Math.round(count * 100 / total)`",
+      "pattern": "floor vs round"
+    },
+    {
+      "symptom": "Votes accepted after the poll closed",
+      "file": "src/polls.js",
+      "hints": ["What type is `closesAt`? What's `'2026-01-01T…' < 1767…`?"],
+      "cause": "`closesAt` is an ISO string. Comparing it to a number coerces it to NaN, so the comparison is always false.",
+      "fix": "`if (clock.now() >= Date.parse(poll.closesAt))`",
+      "pattern": "String vs number date comparison"
+    },
+    {
+      "symptom": "(hidden) Voting for 'pizza' on a yes/no poll works",
+      "file": "src/polls.js",
+      "hints": ["Is `option` checked against `poll.options`?"],
+      "cause": "Any option string is accepted and counted.",
+      "fix": "`if (!poll.options.includes(option)) throw new HttpError(400, …)`",
+      "pattern": "Missing whitelist"
+    }
+  ]
+}
+@@@ ticket.md
+# VOTE-2: Polls are rigged (accidentally)
+
+| Method | Path | Behaviour |
+|---|---|---|
+| `POST` | `/polls/:id/vote { option }` | **201**. One vote per user → **409**. Unknown option → **400**. Closed → **409** |
+| `GET` | `/polls/:id/results` | `{ total, results: [{ option, votes, percent }] }` in poll option order. `percent` rounded to the **nearest** integer; 0 votes → 0 |
+
+Header `x-user-id`. Seed: `lunch` (options `yes`, `no`, closes 2026-12-01), `old` (closed 2026-01-01). Clock frozen at 2026-11-17.
+@@@ repo/package.json
+{ "name": "polls", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/clock.js
+let t = Date.UTC(2026, 10, 17, 12, 0, 0);
+module.exports = { now: () => t, set: (v) => { t = v; } };
+@@@ repo/src/polls.js
+const db = require('memdb');
+const clock = require('./clock');
+
+const polls = db.collection('polls');
+const votes = db.collection('votes');
+
+const ready = Promise.all([
+  polls.insert({ _id: 'lunch', options: ['yes', 'no'], closesAt: '2026-12-01T00:00:00Z' }),
+  polls.insert({ _id: 'old', options: ['a', 'b'], closesAt: '2026-01-01T00:00:00Z' }),
+]);
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+async function load(pollId) {
+  await ready;
+  const p = await polls.findById(pollId);
+  if (!p) throw new HttpError(404, 'poll not found');
+  return p;
+}
+
+async function vote(pollId, userId, option) {
+  const poll = await load(pollId);
+  if (poll.closesAt < clock.now()) throw new HttpError(409, 'poll closed');
+  if (await votes.findOne({ pollId, userID: userId })) throw new HttpError(409, 'already voted');
+  return votes.insert({ pollId, userId, option });
+}
+
+async function results(pollId) {
+  const poll = await load(pollId);
+  const all = await votes.find({ pollId });
+  const total = all.length;
+  return {
+    total,
+    results: poll.options.map((option) => {
+      const count = all.filter((v) => v.option === option).length;
+      return { option, votes: count, percent: total ? Math.floor((count * 100) / total) : 0 };
+    }),
+  };
+}
+
+module.exports = { vote, results };
+@@@ repo/src/app.js
+const express = require('express');
+const svc = require('./polls');
+
+const app = express();
+app.use(express.json());
+app.post('/polls/:id/vote', async (req, res) => {
+  res.status(201).json(await svc.vote(req.params.id, req.get('x-user-id'), req.body.option));
+});
+app.get('/polls/:id/results', async (req, res) => res.json(await svc.results(req.params.id)));
+app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
+
+module.exports = app;
+@@@ repo/tests/polls.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const vote = (poll, user, option) => request(app).post(`/polls/${poll}/vote`).set('x-user-id', user).send({ option });
+const results = (poll) => request(app).get(`/polls/${poll}/results`);
+
+describe('Polls', () => {
+  test('one vote per user', async () => {
+    expect((await vote('lunch', 'u1', 'yes')).status).toBe(201);
+    expect((await vote('lunch', 'u1', 'no')).status).toBe(409);
+    expect((await results('lunch')).body.total).toBe(1);
+  });
+  test('percentages round to nearest', async () => {
+    await vote('lunch', 'a', 'yes'); await vote('lunch', 'b', 'yes'); await vote('lunch', 'c', 'no');
+    expect((await results('lunch')).body.results.map((r) => r.percent)).toEqual([67, 33]);
+  });
+  test('closed poll rejects votes', async () => {
+    expect((await vote('old', 'u1', 'a')).status).toBe(409);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const clock = require('../src/clock');
+
+const vote = (poll, user, option) => request(app).post(`/polls/${poll}/vote`).set('x-user-id', user).send({ option });
+
+describe('hidden', () => {
+  test('unknown option → 400', async () => {
+    expect((await vote('lunch', 'u1', 'pizza')).status).toBe(400);
+  });
+  test('closes exactly at closesAt', async () => {
+    clock.set(Date.UTC(2026, 11, 1, 0, 0, 0));
+    expect((await vote('lunch', 'u1', 'yes')).status).toBe(409);
+  });
+  test('no votes → zeros', async () => {
+    expect((await request(app).get('/polls/lunch/results')).body).toEqual({
+      total: 0, results: [{ option: 'yes', votes: 0, percent: 0 }, { option: 'no', votes: 0, percent: 0 }],
+    });
+  });
+  test('unknown poll → 404', async () => {
+    expect((await vote('nope', 'u1', 'yes')).status).toBe(404);
+  });
+});
+@@@ solution/src/polls.js
+const db = require('memdb');
+const clock = require('./clock');
+
+const polls = db.collection('polls');
+const votes = db.collection('votes');
+
+const ready = Promise.all([
+  polls.insert({ _id: 'lunch', options: ['yes', 'no'], closesAt: '2026-12-01T00:00:00Z' }),
+  polls.insert({ _id: 'old', options: ['a', 'b'], closesAt: '2026-01-01T00:00:00Z' }),
+]);
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+async function load(pollId) {
+  await ready;
+  const p = await polls.findById(pollId);
+  if (!p) throw new HttpError(404, 'poll not found');
+  return p;
+}
+
+async function vote(pollId, userId, option) {
+  const poll = await load(pollId);
+  if (clock.now() >= Date.parse(poll.closesAt)) throw new HttpError(409, 'poll closed');
+  if (!poll.options.includes(option)) throw new HttpError(400, 'unknown option');
+  if (await votes.findOne({ pollId, userId })) throw new HttpError(409, 'already voted');
+  return votes.insert({ pollId, userId, option });
+}
+
+async function results(pollId) {
+  const poll = await load(pollId);
+  const all = await votes.find({ pollId });
+  const total = all.length;
+  return {
+    total,
+    results: poll.options.map((option) => {
+      const count = all.filter((v) => v.option === option).length;
+      return { option, votes: count, percent: total ? Math.round((count * 100) / total) : 0 };
+    }),
+  };
+}
+
+module.exports = { vote, results };

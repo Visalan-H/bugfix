@@ -1,0 +1,182 @@
+@@@ meta.json
+{
+  "id": "h12",
+  "difficulty": "hard",
+  "title": "Daily analytics rollup",
+  "minutes": 40,
+  "tagline": "Unpadded day keys sort wrong, empty days vanish, the last day is cut off, and the overall average is an average of averages.",
+  "tags": ["date keys", "gap filling", "inclusive ranges", "weighted averages"],
+  "lookFor": [
+    "Date keys must be zero-padded `YYYY-MM-DD` to sort as strings. `toISOString().slice(0, 10)` does it for you (UTC).",
+    "Charts need every day in the range, even zero days. Generate the range, then fill.",
+    "'from/to' as dates are usually inclusive. A `<` on `to` cuts off the last day.",
+    "Overall average = total sum / total count. The mean of daily means is wrong when days have different counts."
+  ],
+  "bugs": [
+    {
+      "symptom": "Day 10 sorts before day 9 (and keys look like 2026-3-9)",
+      "file": "src/rollup.js",
+      "hints": ["How is `dayKey` built? Is it padded?"],
+      "cause": "Manually built keys without zero padding sort lexicographically wrong and don't match the YYYY-MM-DD spec.",
+      "fix": "`const dayKey = (ts) => new Date(ts).toISOString().slice(0, 10);`",
+      "pattern": "Unpadded date keys"
+    },
+    {
+      "symptom": "Days with no events are missing",
+      "file": "src/rollup.js",
+      "hints": ["Where do the output days come from: the events or the range?"],
+      "cause": "Only days that have events appear.",
+      "fix": "Loop from `from` to `to` in 1-day steps and emit `{ day, sessions: 0, avgSec: 0 }` for gaps.",
+      "pattern": "Missing gap fill"
+    },
+    {
+      "symptom": "The `to` day is cut off",
+      "file": "src/rollup.js",
+      "hints": ["Events on the `to` day have ts ≥ Date.parse(to). Is that included?"],
+      "cause": "`ts < Date.parse(to)` excludes the whole last day.",
+      "fix": "`ts < Date.parse(to) + DAY_MS`",
+      "pattern": "Exclusive end on an inclusive range"
+    },
+    {
+      "symptom": "(hidden) Overall average is wrong",
+      "file": "src/rollup.js",
+      "hints": ["Day A: 1 session of 100s. Day B: 3 sessions of 10s. What's the real average?"],
+      "cause": "It averages the daily averages, so a day with 1 session counts as much as a day with 100.",
+      "fix": "`overallAvgSec = totalSec / totalSessions` (0 if no sessions)",
+      "pattern": "Average of averages"
+    }
+  ]
+}
+@@@ ticket.md
+# DATA-8: Dashboard chart looks broken
+
+`GET /stats/daily?from=YYYY-MM-DD&to=YYYY-MM-DD` (both days included, UTC) →
+`{ days: [{ day, sessions, avgSec }], overallAvgSec }`
+
+* One entry for **every** day in the range, in order, `day` formatted `YYYY-MM-DD`. Days without sessions → `sessions: 0, avgSec: 0`.
+* `avgSec` = that day's mean session duration, rounded to an integer.
+* `overallAvgSec` = mean over **all sessions** in the range, rounded.
+
+Sessions come from `src/sessions.js`.
+@@@ repo/package.json
+{ "name": "analytics", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/sessions.js
+const at = (d, h) => Date.UTC(2026, 2, d, h);
+module.exports = [
+  { ts: at(8, 10), durationSec: 100 },
+  { ts: at(9, 9), durationSec: 10 },
+  { ts: at(9, 13), durationSec: 20 },
+  { ts: at(9, 22), durationSec: 30 },
+  { ts: at(11, 7), durationSec: 50 },
+  { ts: at(12, 23), durationSec: 70 },
+];
+@@@ repo/src/rollup.js
+const sessions = require('./sessions');
+
+const dayKey = (ts) => {
+  const d = new Date(ts);
+  return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+};
+
+function daily(from, to) {
+  const start = Date.parse(from);
+  const end = Date.parse(to);
+  const inRange = sessions.filter((s) => s.ts >= start && s.ts < end);
+
+  const byDay = {};
+  for (const s of inRange) {
+    const k = dayKey(s.ts);
+    (byDay[k] = byDay[k] || []).push(s.durationSec);
+  }
+
+  const days = Object.keys(byDay).sort().map((day) => {
+    const list = byDay[day];
+    return { day, sessions: list.length, avgSec: Math.round(list.reduce((a, b) => a + b, 0) / list.length) };
+  });
+
+  const overallAvgSec = days.length ? Math.round(days.reduce((a, d) => a + d.avgSec, 0) / days.length) : 0;
+  return { days, overallAvgSec };
+}
+
+module.exports = { daily };
+@@@ repo/src/app.js
+const express = require('express');
+const { daily } = require('./rollup');
+
+const app = express();
+app.get('/stats/daily', (req, res) => res.json(daily(req.query.from, req.query.to)));
+
+module.exports = app;
+@@@ repo/tests/rollup.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const stats = (from, to) => request(app).get(`/stats/daily?from=${from}&to=${to}`);
+
+describe('Daily rollup', () => {
+  test('padded keys, in order', async () => {
+    const res = await stats('2026-03-08', '2026-03-12');
+    expect(res.body.days.map((d) => d.day)).toEqual(['2026-03-08', '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12']);
+  });
+  test('empty days are filled with zeros', async () => {
+    const res = await stats('2026-03-09', '2026-03-11');
+    expect(res.body.days).toEqual([
+      { day: '2026-03-09', sessions: 3, avgSec: 20 },
+      { day: '2026-03-10', sessions: 0, avgSec: 0 },
+      { day: '2026-03-11', sessions: 1, avgSec: 50 },
+    ]);
+  });
+  test('the to-day is included', async () => {
+    const res = await stats('2026-03-12', '2026-03-12');
+    expect(res.body.days).toEqual([{ day: '2026-03-12', sessions: 1, avgSec: 70 }]);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+describe('hidden', () => {
+  test('overall average is per session', async () => {
+    const res = await request(app).get('/stats/daily?from=2026-03-08&to=2026-03-09');
+    expect(res.body.overallAvgSec).toBe(40);
+  });
+  test('range with no sessions', async () => {
+    const res = await request(app).get('/stats/daily?from=2026-04-01&to=2026-04-02');
+    expect(res.body).toEqual({ days: [{ day: '2026-04-01', sessions: 0, avgSec: 0 }, { day: '2026-04-02', sessions: 0, avgSec: 0 }], overallAvgSec: 0 });
+  });
+  test('whole range', async () => {
+    const res = await request(app).get('/stats/daily?from=2026-03-01&to=2026-03-31');
+    expect(res.body.days).toHaveLength(31);
+    expect(res.body.overallAvgSec).toBe(47);
+  });
+});
+@@@ solution/src/rollup.js
+const sessions = require('./sessions');
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const dayKey = (ts) => new Date(ts).toISOString().slice(0, 10);
+
+function daily(from, to) {
+  const start = Date.parse(from);
+  const end = Date.parse(to) + DAY_MS;
+  const inRange = sessions.filter((s) => s.ts >= start && s.ts < end);
+
+  const byDay = {};
+  for (const s of inRange) {
+    const k = dayKey(s.ts);
+    (byDay[k] = byDay[k] || []).push(s.durationSec);
+  }
+
+  const days = [];
+  for (let t = start; t < end; t += DAY_MS) {
+    const day = dayKey(t);
+    const list = byDay[day] || [];
+    days.push({ day, sessions: list.length, avgSec: list.length ? Math.round(list.reduce((a, b) => a + b, 0) / list.length) : 0 });
+  }
+
+  const total = inRange.reduce((a, s) => a + s.durationSec, 0);
+  const overallAvgSec = inRange.length ? Math.round(total / inRange.length) : 0;
+  return { days, overallAvgSec };
+}
+
+module.exports = { daily };

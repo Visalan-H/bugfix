@@ -1,0 +1,235 @@
+@@@ meta.json
+{
+  "id": "e2",
+  "difficulty": "easy",
+  "title": "Product catalog: pagination & sorting",
+  "minutes": 20,
+  "tagline": "Off-by-one, string + number, a comparator that lies, and shared state.",
+  "tags": ["pagination", "type coercion", "sort", "shared state"],
+  "lookFor": [
+    "Pagination is almost always `skip = (page - 1) * limit`. Check page 1 AND page 2.",
+    "`'2' * 2` is 4 but `2 + '2'` is '22'. `*` turns strings into numbers, `+` glues them together.",
+    "A sort comparator must return a negative, zero or positive NUMBER. A boolean is never negative.",
+    "`.sort()` sorts in place. If you sort a module-level array, every later request sees the change."
+  ],
+  "bugs": [
+    {
+      "symptom": "Page 1 skips the first products",
+      "file": "src/services/catalogService.js",
+      "hints": [
+        "With page=1 and limit=3, which index should the slice start at?",
+        "Look at how `skip` is computed."
+      ],
+      "cause": "`skip = page * limit` treats pages as 0-based, but the API is 1-based. Page 1 starts at index 3.",
+      "fix": "`const skip = (page - 1) * limit;`",
+      "pattern": "Off-by-one in pagination"
+    },
+    {
+      "symptom": "Page 2 returns way too many items",
+      "file": "src/services/catalogService.js",
+      "hints": [
+        "Log `typeof limit` when it comes from the query string.",
+        "What is `2 + '2'` in JavaScript?"
+      ],
+      "cause": "`limit` from `req.query` is the string `'2'`. `skip + limit` becomes `'22'`, so the slice end is 22. `*` converts strings, which is why the skip math looked fine.",
+      "fix": "Parse once at the top: `page = Number(page) || 1; limit = Number(limit) || DEFAULT_LIMIT;`",
+      "pattern": "String concatenation with `+`"
+    },
+    {
+      "symptom": "sort=price_asc doesn't sort",
+      "file": "src/services/catalogService.js",
+      "hints": [
+        "What does the comparator return? What does Array.prototype.sort expect?"
+      ],
+      "cause": "`(a, b) => a.price > b.price` returns true/false (1/0). Sort needs a negative number to move things, so V8's TimSort leaves the order mostly unchanged.",
+      "fix": "`(a, b) => a.price - b.price` (and `b.price - a.price` for desc)",
+      "pattern": "Boolean comparator"
+    },
+    {
+      "symptom": "(hidden) Sorting once changes the default order for everyone",
+      "file": "src/services/catalogService.js",
+      "hints": [
+        "When there's no category filter, what is `items`? The same array as `products`?",
+        "Does `.sort()` return a new array?"
+      ],
+      "cause": "Without a category, `items === products`, the module-level array. `.sort()` sorts it in place, so after one sorted request every later unsorted request gets the sorted order. Real servers share module state across requests.",
+      "fix": "Sort a copy: `return [...items].sort(...)`",
+      "pattern": "Mutating shared module state"
+    }
+  ]
+}
+@@@ ticket.md
+# CAT-311: Catalog pagination is broken
+
+`GET /products` powers the storefront grid. QA reports that **page 1 is missing products**, **page 2 shows everything**, and **price sorting does nothing**.
+
+## How it should work
+`GET /products?page=&limit=&sort=&category=`
+
+* `page` is **1-based**, default `1`. `limit` default `3`.
+* `sort`: `price_asc` | `price_desc`. Omitted means catalog order (p1 … p7).
+* `category` filters exactly.
+* Response: `{ data, page, limit, total }`. `total` = count **after** filtering, **before** paging. `page` and `limit` are numbers.
+
+Make `tests/catalog.test.js` pass, then Submit.
+@@@ repo/package.json
+{
+  "name": "catalog-service",
+  "version": "1.0.0",
+  "scripts": { "test": "jest" },
+  "dependencies": { "express": "^5.0.0" },
+  "devDependencies": { "jest": "^29.0.0", "supertest": "^7.0.0" }
+}
+@@@ repo/src/app.js
+const express = require('express');
+const productRoutes = require('./routes/products');
+
+const app = express();
+app.use(express.json());
+app.use('/products', productRoutes);
+
+module.exports = app;
+@@@ repo/src/routes/products.js
+const express = require('express');
+const catalog = require('../services/catalogService');
+
+const router = express.Router();
+
+router.get('/', (req, res) => {
+  const { page, limit, sort, category } = req.query;
+  res.json(catalog.listProducts({ page, limit, sort, category }));
+});
+
+module.exports = router;
+@@@ repo/src/data/products.js
+// In a real app this comes from the DB. Order here = default catalog order.
+module.exports = [
+  { id: 'p1', name: 'Kindle Paperwhite', category: 'electronics', price: 13999 },
+  { id: 'p2', name: 'Echo Dot', category: 'electronics', price: 4499 },
+  { id: 'p3', name: 'Atomic Habits', category: 'books', price: 499 },
+  { id: 'p4', name: 'Fire TV Stick', category: 'electronics', price: 3999 },
+  { id: 'p5', name: 'Clean Code', category: 'books', price: 2399 },
+  { id: 'p6', name: 'Yoga Mat', category: 'fitness', price: 899 },
+  { id: 'p7', name: 'Dumbbells 5kg', category: 'fitness', price: 1599 },
+];
+@@@ repo/src/services/catalogService.js
+const products = require('../data/products');
+
+const DEFAULT_LIMIT = 3;
+
+function sortProducts(items, sort) {
+  if (sort === 'price_asc') {
+    return items.sort((a, b) => a.price > b.price);
+  }
+  if (sort === 'price_desc') {
+    return items.sort((a, b) => a.price < b.price);
+  }
+  return items;
+}
+
+function listProducts({ page, limit, sort, category }) {
+  page = page || 1;
+  limit = limit || DEFAULT_LIMIT;
+
+  let items = category ? products.filter((p) => p.category === category) : products;
+  items = sortProducts(items, sort);
+
+  const total = items.length;
+  const skip = page * limit;
+  const data = items.slice(skip, skip + limit);
+
+  return { data, page: Number(page), limit: Number(limit), total };
+}
+
+module.exports = { listProducts };
+@@@ repo/tests/catalog.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const ids = (res) => res.body.data.map((p) => p.id);
+
+describe('GET /products', () => {
+  test('defaults to page 1 with 3 items', async () => {
+    const res = await request(app).get('/products');
+    expect(res.status).toBe(200);
+    expect(ids(res)).toEqual(['p1', 'p2', 'p3']);
+    expect(res.body.total).toBe(7);
+  });
+
+  test('page=2&limit=2 returns the 3rd and 4th products', async () => {
+    const res = await request(app).get('/products?page=2&limit=2');
+    expect(ids(res)).toEqual(['p3', 'p4']);
+    expect(res.body.page).toBe(2);
+    expect(res.body.limit).toBe(2);
+  });
+
+  test('sort=price_asc puts the cheapest first', async () => {
+    const res = await request(app).get('/products?sort=price_asc&limit=4');
+    expect(ids(res)).toEqual(['p3', 'p6', 'p7', 'p5']);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const ids = (res) => res.body.data.map((p) => p.id);
+
+describe('hidden', () => {
+  test('price_desc puts the most expensive first', async () => {
+    const res = await request(app).get('/products?sort=price_desc&limit=2');
+    expect(ids(res)).toEqual(['p1', 'p2']);
+  });
+
+  test('sorting does not change the default order for later requests', async () => {
+    await request(app).get('/products?sort=price_asc');
+    const res = await request(app).get('/products');
+    expect(ids(res)).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  test('category + sort + total', async () => {
+    const res = await request(app).get('/products?category=books&sort=price_asc');
+    expect(ids(res)).toEqual(['p3', 'p5']);
+    expect(res.body.total).toBe(2);
+  });
+
+  test('last partial page', async () => {
+    const res = await request(app).get('/products?page=2&limit=5');
+    expect(ids(res)).toEqual(['p6', 'p7']);
+  });
+
+  test('page past the end is empty but total is still correct', async () => {
+    const res = await request(app).get('/products?page=9');
+    expect(res.body.data).toEqual([]);
+    expect(res.body.total).toBe(7);
+  });
+});
+@@@ solution/src/services/catalogService.js
+const products = require('../data/products');
+
+const DEFAULT_LIMIT = 3;
+
+function sortProducts(items, sort) {
+  if (sort === 'price_asc') {
+    return [...items].sort((a, b) => a.price - b.price);
+  }
+  if (sort === 'price_desc') {
+    return [...items].sort((a, b) => b.price - a.price);
+  }
+  return items;
+}
+
+function listProducts({ page, limit, sort, category }) {
+  page = Number(page) || 1;
+  limit = Number(limit) || DEFAULT_LIMIT;
+
+  let items = category ? products.filter((p) => p.category === category) : products;
+  items = sortProducts(items, sort);
+
+  const total = items.length;
+  const skip = (page - 1) * limit;
+  const data = items.slice(skip, skip + limit);
+
+  return { data, page, limit, total };
+}
+
+module.exports = { listProducts };

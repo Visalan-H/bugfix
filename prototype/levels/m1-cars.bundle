@@ -1,0 +1,385 @@
+@@@ meta.json
+{
+  "id": "m1",
+  "difficulty": "medium",
+  "title": "Car rental: leaked cars, missing cars, lost edits",
+  "minutes": 30,
+  "tagline": "Modelled on a reported Amazon OA: a Node car-rental backend with 3 independent bugs.",
+  "tags": ["auth/ownership", "cache invalidation", "persistence", "layered code"],
+  "lookFor": [
+    "Trace identity: where is req.user set, and what is the property actually called? Follow it into the query.",
+    "Mongoose drops `undefined` filter keys, so `{ owner: undefined }` becomes `{}`, which matches EVERYTHING. A leak, not an empty list.",
+    "Any write path (create/update/delete) must invalidate every cache the read paths use.",
+    "A 200 with the new values does not prove a write. Re-GET after every write to check it stuck.",
+    "Check ownership on EVERY endpoint that takes an :id, not just the list."
+  ],
+  "bugs": [
+    {
+      "symptom": "My Cars shows other people's cars",
+      "file": "src/controllers/carController.js",
+      "hints": [
+        "Open src/middleware/auth.js. What shape does req.user have?",
+        "The controller passes `req.user.userId`. Does that property exist? What does memdb (like Mongoose) do with an undefined filter value?"
+      ],
+      "cause": "auth sets `req.user = { id }` but the controller reads `req.user.userId` → `undefined`. The filter `{ owner: undefined }` is stripped to `{}` and returns every car in the system. It's an access-control hole, not a display bug.",
+      "fix": "Use `req.user.id` everywhere in the controller.",
+      "pattern": "Wrong property name → undefined filter → data leak"
+    },
+    {
+      "symptom": "A newly added car never appears",
+      "file": "src/services/carService.js",
+      "hints": [
+        "Was the car never stored, or stored but not returned? Check with GET /cars/:id.",
+        "listMine reads from a cache. Who clears that cache?"
+      ],
+      "cause": "`listMine` caches the list per owner. `updateCar` invalidates it but `addCar` doesn't, so the first list (empty) is served forever.",
+      "fix": "Call `invalidate(ownerId)` in `addCar` after the insert.",
+      "pattern": "Stale cache: write path doesn't invalidate"
+    },
+    {
+      "symptom": "Edits are lost on refresh",
+      "file": "src/services/carService.js",
+      "hints": [
+        "PATCH returns the new values. Is anything actually written to the DB?",
+        "memdb returns COPIES. Mutating the object you fetched changes nothing stored."
+      ],
+      "cause": "`updateCar` does `Object.assign(car, changes)` on the fetched copy and returns it. Nothing is persisted. The response looks right, so the bug only shows up on the next read.",
+      "fix": "`const updated = await carRepo.update(carId, pick(changes, EDITABLE)); invalidate(ownerId); return updated;`",
+      "pattern": "Mutating a fetched document without saving"
+    },
+    {
+      "symptom": "(hidden) GET /cars/:id returns other users' cars",
+      "file": "src/services/carService.js",
+      "hints": [
+        "Compare getCar with updateCar. One checks ownership, one doesn't."
+      ],
+      "cause": "`getCar` returns any car by id with no owner check (an IDOR). The list was fixed but single-resource reads weren't.",
+      "fix": "`if (!car || car.owner !== ownerId) return null;` and pass ownerId from the controller.",
+      "pattern": "Missing ownership check (IDOR)"
+    }
+  ]
+}
+@@@ ticket.md
+# RENT-907: "My Garage" is broken
+
+Users list cars they rent out. Support has three tickets:
+
+1. **"My Cars shows other people's cars."**
+2. **"I added a car and it never showed up."**
+3. **"I edited my car's daily rate, it said saved, then it reverted after refresh."**
+
+## Auth
+Every request carries `x-user-id`. Missing → **401**.
+
+## API
+| Method | Path | Behaviour |
+|---|---|---|
+| `GET` | `/cars/mine` | Only the caller's cars |
+| `POST` | `/cars` `{ model, dailyRate }` | **201**, owner = caller |
+| `GET` | `/cars/:id` | Caller's car, otherwise **404** |
+| `PATCH` | `/cars/:id` `{ model?, dailyRate? }` | Persist the edit, return the updated car. Not yours → **404**. `owner` can't be changed. |
+
+The bugs are independent. Make `tests/cars.test.js` pass, then Submit.
+@@@ repo/package.json
+{
+  "name": "car-rental-api",
+  "version": "2.3.1",
+  "scripts": { "test": "jest" },
+  "dependencies": { "express": "^5.0.0", "memdb": "1.0.0" },
+  "devDependencies": { "jest": "^29.0.0", "supertest": "^7.0.0" }
+}
+@@@ repo/README.md
+# car-rental-api
+
+Layers: `routes → controllers → services → repositories → memdb`
+
+* `memdb` behaves like Mongoose: async calls, returns **copies**, and **drops `undefined` keys from filters**.
+* `src/lib/cache.js` is a per-process in-memory cache.
+@@@ repo/src/app.js
+const express = require('express');
+const auth = require('./middleware/auth');
+const carRoutes = require('./routes/cars');
+
+const app = express();
+app.use(express.json());
+app.use(auth);
+app.use('/cars', carRoutes);
+
+module.exports = app;
+@@@ repo/src/middleware/auth.js
+// In prod this verifies a JWT. For the exercise the gateway passes the user id in a header.
+module.exports = function auth(req, res, next) {
+  const userId = req.get('x-user-id');
+  if (!userId) {
+    return res.status(401).json({ error: 'unauthenticated' });
+  }
+  req.user = { id: userId };
+  next();
+};
+@@@ repo/src/routes/cars.js
+const express = require('express');
+const ctrl = require('../controllers/carController');
+
+const router = express.Router();
+
+router.get('/mine', ctrl.listMine);
+router.post('/', ctrl.create);
+router.get('/:id', ctrl.getOne);
+router.patch('/:id', ctrl.update);
+
+module.exports = router;
+@@@ repo/src/controllers/carController.js
+const carService = require('../services/carService');
+
+exports.listMine = async (req, res) => {
+  const cars = await carService.listMine(req.user.userId);
+  res.json(cars);
+};
+
+exports.create = async (req, res) => {
+  const { model, dailyRate } = req.body;
+  if (!model || typeof dailyRate !== 'number' || dailyRate <= 0) {
+    return res.status(400).json({ error: 'model and positive dailyRate are required' });
+  }
+  const car = await carService.addCar(req.user.id, { model, dailyRate });
+  res.status(201).json(car);
+};
+
+exports.getOne = async (req, res) => {
+  const car = await carService.getCar(req.params.id);
+  if (!car) return res.status(404).json({ error: 'car not found' });
+  res.json(car);
+};
+
+exports.update = async (req, res) => {
+  const car = await carService.updateCar(req.user.id, req.params.id, req.body);
+  if (!car) return res.status(404).json({ error: 'car not found' });
+  res.json(car);
+};
+@@@ repo/src/services/carService.js
+const carRepo = require('../repositories/carRepo');
+const cache = require('../lib/cache');
+
+const EDITABLE = ['model', 'dailyRate'];
+const key = (ownerId) => `cars:${ownerId}`;
+
+function pick(obj, fields) {
+  const out = {};
+  for (const f of fields) if (obj[f] !== undefined) out[f] = obj[f];
+  return out;
+}
+
+function invalidate(ownerId) {
+  cache.del(key(ownerId));
+}
+
+async function listMine(ownerId) {
+  const cached = cache.get(key(ownerId));
+  if (cached) return cached;
+  const cars = await carRepo.findByOwner(ownerId);
+  cache.set(key(ownerId), cars);
+  return cars;
+}
+
+async function addCar(ownerId, { model, dailyRate }) {
+  const car = await carRepo.insert({ owner: ownerId, model, dailyRate });
+  return car;
+}
+
+async function getCar(carId) {
+  return carRepo.findById(carId);
+}
+
+async function updateCar(ownerId, carId, changes) {
+  const car = await carRepo.findById(carId);
+  if (!car || car.owner !== ownerId) return null;
+
+  Object.assign(car, pick(changes, EDITABLE));
+  invalidate(ownerId);
+  return car;
+}
+
+module.exports = { listMine, addCar, getCar, updateCar };
+@@@ repo/src/repositories/carRepo.js
+const db = require('memdb');
+const cars = db.collection('cars');
+
+exports.findByOwner = (owner) => cars.find({ owner });
+exports.findById = (id) => cars.findById(id);
+exports.insert = (doc) => cars.insert(doc);
+exports.update = (id, patch) => cars.updateById(id, patch);
+@@@ repo/src/lib/cache.js
+const store = new Map();
+
+module.exports = {
+  get: (k) => store.get(k),
+  set: (k, v) => store.set(k, v),
+  del: (k) => store.delete(k),
+};
+@@@ repo/tests/cars.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const as = (user) => ({
+  get: (url) => request(app).get(url).set('x-user-id', user),
+  post: (url, body) => request(app).post(url).set('x-user-id', user).send(body),
+  patch: (url, body) => request(app).patch(url).set('x-user-id', user).send(body),
+});
+const alice = as('alice');
+const bob = as('bob');
+
+describe('My Garage', () => {
+  test('GET /cars/mine only returns my cars', async () => {
+    await alice.post('/cars', { model: 'Swift', dailyRate: 1800 });
+    await bob.post('/cars', { model: 'Creta', dailyRate: 3200 });
+
+    const res = await alice.get('/cars/mine');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].owner).toBe('alice');
+  });
+
+  test('a newly added car shows up in My Cars', async () => {
+    const before = await alice.get('/cars/mine');
+    expect(before.body).toHaveLength(0);
+
+    await alice.post('/cars', { model: 'Nexon', dailyRate: 2500 });
+    const after = await alice.get('/cars/mine');
+    expect(after.body).toHaveLength(1);
+    expect(after.body[0].model).toBe('Nexon');
+  });
+
+  test('an edit is persisted', async () => {
+    const created = await alice.post('/cars', { model: 'i20', dailyRate: 2000 });
+    const id = created.body._id;
+
+    const patched = await alice.patch(`/cars/${id}`, { dailyRate: 2400 });
+    expect(patched.status).toBe(200);
+    expect(patched.body.dailyRate).toBe(2400);
+
+    const fresh = await alice.get(`/cars/${id}`);
+    expect(fresh.body.dailyRate).toBe(2400);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const as = (user) => ({
+  get: (url) => request(app).get(url).set('x-user-id', user),
+  post: (url, body) => request(app).post(url).set('x-user-id', user).send(body),
+  patch: (url, body) => request(app).patch(url).set('x-user-id', user).send(body),
+});
+const alice = as('alice');
+const bob = as('bob');
+
+describe('hidden', () => {
+  test('cannot read another user\'s car by id', async () => {
+    const c = await bob.post('/cars', { model: 'Thar', dailyRate: 4000 });
+    const res = await alice.get(`/cars/${c.body._id}`);
+    expect(res.status).toBe(404);
+  });
+
+  test('cannot edit another user\'s car', async () => {
+    const c = await bob.post('/cars', { model: 'Thar', dailyRate: 4000 });
+    const res = await alice.patch(`/cars/${c.body._id}`, { dailyRate: 1 });
+    expect(res.status).toBe(404);
+    const still = await bob.get(`/cars/${c.body._id}`);
+    expect(still.body.dailyRate).toBe(4000);
+  });
+
+  test('edit shows up in My Cars (cache invalidated on update)', async () => {
+    const c = await alice.post('/cars', { model: 'City', dailyRate: 2200 });
+    await alice.get('/cars/mine');
+    await alice.patch(`/cars/${c.body._id}`, { dailyRate: 2600 });
+    const list = await alice.get('/cars/mine');
+    expect(list.body[0].dailyRate).toBe(2600);
+  });
+
+  test('owner cannot be changed through PATCH', async () => {
+    const c = await alice.post('/cars', { model: 'City', dailyRate: 2200 });
+    await alice.patch(`/cars/${c.body._id}`, { owner: 'bob' });
+    const res = await alice.get(`/cars/${c.body._id}`);
+    expect(res.body.owner).toBe('alice');
+  });
+
+  test('missing x-user-id is 401', async () => {
+    const res = await request(app).get('/cars/mine');
+    expect(res.status).toBe(401);
+  });
+});
+@@@ solution/src/controllers/carController.js
+const carService = require('../services/carService');
+
+exports.listMine = async (req, res) => {
+  const cars = await carService.listMine(req.user.id);
+  res.json(cars);
+};
+
+exports.create = async (req, res) => {
+  const { model, dailyRate } = req.body;
+  if (!model || typeof dailyRate !== 'number' || dailyRate <= 0) {
+    return res.status(400).json({ error: 'model and positive dailyRate are required' });
+  }
+  const car = await carService.addCar(req.user.id, { model, dailyRate });
+  res.status(201).json(car);
+};
+
+exports.getOne = async (req, res) => {
+  const car = await carService.getCar(req.user.id, req.params.id);
+  if (!car) return res.status(404).json({ error: 'car not found' });
+  res.json(car);
+};
+
+exports.update = async (req, res) => {
+  const car = await carService.updateCar(req.user.id, req.params.id, req.body);
+  if (!car) return res.status(404).json({ error: 'car not found' });
+  res.json(car);
+};
+@@@ solution/src/services/carService.js
+const carRepo = require('../repositories/carRepo');
+const cache = require('../lib/cache');
+
+const EDITABLE = ['model', 'dailyRate'];
+const key = (ownerId) => `cars:${ownerId}`;
+
+function pick(obj, fields) {
+  const out = {};
+  for (const f of fields) if (obj[f] !== undefined) out[f] = obj[f];
+  return out;
+}
+
+function invalidate(ownerId) {
+  cache.del(key(ownerId));
+}
+
+async function listMine(ownerId) {
+  const cached = cache.get(key(ownerId));
+  if (cached) return cached;
+  const cars = await carRepo.findByOwner(ownerId);
+  cache.set(key(ownerId), cars);
+  return cars;
+}
+
+async function addCar(ownerId, { model, dailyRate }) {
+  const car = await carRepo.insert({ owner: ownerId, model, dailyRate });
+  invalidate(ownerId);
+  return car;
+}
+
+async function getCar(ownerId, carId) {
+  const car = await carRepo.findById(carId);
+  if (!car || car.owner !== ownerId) return null;
+  return car;
+}
+
+async function updateCar(ownerId, carId, changes) {
+  const car = await carRepo.findById(carId);
+  if (!car || car.owner !== ownerId) return null;
+
+  const updated = await carRepo.update(carId, pick(changes, EDITABLE));
+  invalidate(ownerId);
+  return updated;
+}
+
+module.exports = { listMine, addCar, getCar, updateCar };

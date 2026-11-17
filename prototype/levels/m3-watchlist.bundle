@@ -1,0 +1,336 @@
+@@@ meta.json
+{
+  "id": "m3",
+  "difficulty": "medium",
+  "title": "Movie DB watch list",
+  "minutes": 30,
+  "tagline": "Modelled on a reported Amazon OA: duplicates slip in, removals don't stick, and errors keep running.",
+  "tags": ["object identity", "check order", "unsaved writes", "status codes"],
+  "lookFor": [
+    "`array.includes(obj)` compares by reference. Two objects with the same fields are never equal. Compare ids.",
+    "Order of checks: does the list exist → does the movie exist → is it a duplicate → write. Each failure returns immediately.",
+    "`.filter()` returns a NEW array. If you don't assign it and save it, nothing changed.",
+    "A save that isn't awaited can lose a race with the very next request.",
+    "Deleting something that isn't there should say so (404), not report success."
+  ],
+  "bugs": [
+    {
+      "symptom": "Adding the same movie twice is allowed",
+      "file": "src/services/watchlistService.js",
+      "hints": [
+        "What does `[{ movieId: 'm1' }].includes({ movieId: 'm1' })` return?"
+      ],
+      "cause": "`wl.items.includes({ movieId })` builds a brand-new object, which is never the same reference as any stored item, so the duplicate check is always false.",
+      "fix": "`if (wl.items.some((i) => i.movieId === movieId)) throw new ConflictError(...)`",
+      "pattern": "Reference vs value comparison"
+    },
+    {
+      "symptom": "Second add still succeeds right after the first",
+      "file": "src/services/watchlistService.js",
+      "hints": [
+        "After fixing the duplicate check, the test can still fail. Is the save awaited before the response goes out?"
+      ],
+      "cause": "`repo.save(wl)` isn't awaited. The 201 goes out before the write lands, so the next request reads the old list and doesn't see the duplicate.",
+      "fix": "`await repo.save(wl);`",
+      "pattern": "Missing await on write"
+    },
+    {
+      "symptom": "Unknown movie returns 404 but gets added anyway",
+      "file": "src/controllers/watchlistController.js",
+      "hints": [
+        "The 404 is sent. Does the handler stop there?"
+      ],
+      "cause": "The not-found branch sends a 404 but doesn't `return`, so execution continues: the movie is added and a second response is attempted.",
+      "fix": "`return res.status(404).json({ error: 'movie not found' });`",
+      "pattern": "Missing return after responding"
+    },
+    {
+      "symptom": "Removed movies come back",
+      "file": "src/services/watchlistService.js",
+      "hints": [
+        "What happens to the return value of `wl.items.filter(...)`?"
+      ],
+      "cause": "`wl.items.filter(...)` returns a new array that's thrown away. `wl.items` is unchanged, so the save writes the old list back.",
+      "fix": "`wl.items = wl.items.filter((i) => i.movieId !== movieId);` then `await repo.save(wl)`",
+      "pattern": "Discarded return value"
+    },
+    {
+      "symptom": "(hidden) Removing a movie that isn't in the list returns 204",
+      "file": "src/services/watchlistService.js",
+      "hints": [
+        "How would you know whether the filter actually removed anything?"
+      ],
+      "cause": "No check that something was removed, so a missing item looks like success.",
+      "fix": "Compare lengths before and after; if equal, throw NotFoundError.",
+      "pattern": "No-op reported as success"
+    }
+  ]
+}
+@@@ ticket.md
+# MDB-420: Watch list is unreliable
+
+Each user has one watch list of movies.
+
+## API (header `x-user-id`)
+| Method | Path | Behaviour |
+|---|---|---|
+| `GET` | `/watchlist` | `{ items: [{ movieId, title, addedAt }] }` |
+| `POST` | `/watchlist` `{ movieId }` | **201** + the list. Unknown movie → **404** (nothing added). Already in list → **409**. |
+| `DELETE` | `/watchlist/:movieId` | **204**. Not in the list → **404**. |
+
+Movies `m1`–`m4` are seeded.
+@@@ repo/package.json
+{
+  "name": "movie-db-watchlist",
+  "version": "1.2.0",
+  "scripts": { "test": "jest" },
+  "dependencies": { "express": "^5.0.0", "memdb": "1.0.0" },
+  "devDependencies": { "jest": "^29.0.0", "supertest": "^7.0.0" }
+}
+@@@ repo/src/app.js
+const express = require('express');
+const ctrl = require('./controllers/watchlistController');
+const errorHandler = require('./middleware/errorHandler');
+
+const app = express();
+app.use(express.json());
+app.use((req, res, next) => {
+  const id = req.get('x-user-id');
+  if (!id) return res.status(401).json({ error: 'unauthenticated' });
+  req.userId = id;
+  next();
+});
+app.get('/watchlist', ctrl.get);
+app.post('/watchlist', ctrl.add);
+app.delete('/watchlist/:movieId', ctrl.remove);
+app.use(errorHandler);
+
+module.exports = app;
+@@@ repo/src/errors.js
+class AppError extends Error { constructor(m, status) { super(m); this.status = status; } }
+class NotFoundError extends AppError { constructor(m = 'not found') { super(m, 404); } }
+class ConflictError extends AppError { constructor(m) { super(m, 409); } }
+
+module.exports = { NotFoundError, ConflictError };
+@@@ repo/src/middleware/errorHandler.js
+module.exports = function errorHandler(err, req, res, next) {
+  const status = err.status || 500;
+  if (status === 500) console.error(err);
+  res.status(status).json({ error: err.message });
+};
+@@@ repo/src/controllers/watchlistController.js
+const service = require('../services/watchlistService');
+const movieRepo = require('../repositories/movieRepo');
+
+exports.get = async (req, res) => {
+  res.json(await service.getList(req.userId));
+};
+
+exports.add = async (req, res) => {
+  const { movieId } = req.body;
+  const movie = await movieRepo.findById(movieId);
+  if (!movie) {
+    res.status(404).json({ error: 'movie not found' });
+  }
+  const list = await service.addMovie(req.userId, movieId);
+  res.status(201).json(list);
+};
+
+exports.remove = async (req, res) => {
+  await service.removeMovie(req.userId, req.params.movieId);
+  res.status(204).end();
+};
+@@@ repo/src/services/watchlistService.js
+const repo = require('../repositories/watchlistRepo');
+const movieRepo = require('../repositories/movieRepo');
+const { ConflictError } = require('../errors');
+
+async function getList(userId) {
+  const wl = await repo.getOrCreate(userId);
+  const items = await Promise.all(wl.items.map(async (i) => {
+    const movie = await movieRepo.findById(i.movieId);
+    return { ...i, title: movie ? movie.title : null };
+  }));
+  return { items };
+}
+
+async function addMovie(userId, movieId) {
+  const wl = await repo.getOrCreate(userId);
+  if (wl.items.includes({ movieId })) {
+    throw new ConflictError('movie already in watch list');
+  }
+  wl.items.push({ movieId, addedAt: Date.now() });
+  repo.save(wl);
+  return getList(userId);
+}
+
+async function removeMovie(userId, movieId) {
+  const wl = await repo.getOrCreate(userId);
+  wl.items.filter((i) => i.movieId !== movieId);
+  await repo.save(wl);
+}
+
+module.exports = { getList, addMovie, removeMovie };
+@@@ repo/src/repositories/watchlistRepo.js
+const db = require('memdb');
+const lists = db.collection('watchlists');
+
+exports.getOrCreate = async (userId) => {
+  const found = await lists.findOne({ userId });
+  if (found) return found;
+  return lists.insert({ userId, items: [] });
+};
+
+exports.save = (wl) => lists.updateById(wl._id, { items: wl.items });
+@@@ repo/src/repositories/movieRepo.js
+const db = require('memdb');
+const movies = db.collection('movies');
+
+const ready = Promise.all([
+  movies.insert({ _id: 'm1', title: 'Inception' }),
+  movies.insert({ _id: 'm2', title: 'Arrival' }),
+  movies.insert({ _id: 'm3', title: 'Dune' }),
+  movies.insert({ _id: 'm4', title: 'Interstellar' }),
+]);
+
+exports.findById = async (id) => { await ready; return movies.findById(id); };
+@@@ repo/tests/watchlist.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const u = 'u1';
+const add = (movieId) => request(app).post('/watchlist').set('x-user-id', u).send({ movieId });
+const list = () => request(app).get('/watchlist').set('x-user-id', u);
+const del = (movieId) => request(app).delete(`/watchlist/${movieId}`).set('x-user-id', u);
+
+describe('Watch list', () => {
+  test('add a movie', async () => {
+    const res = await add('m1');
+    expect(res.status).toBe(201);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].title).toBe('Inception');
+  });
+
+  test('adding the same movie twice → 409', async () => {
+    await add('m2');
+    const res = await add('m2');
+    expect(res.status).toBe(409);
+    expect((await list()).body.items).toHaveLength(1);
+  });
+
+  test('unknown movie → 404 and nothing is added', async () => {
+    const res = await add('m999');
+    expect(res.status).toBe(404);
+    expect((await list()).body.items).toHaveLength(0);
+  });
+
+  test('removed movie stays removed', async () => {
+    await add('m1');
+    await add('m3');
+    const res = await del('m1');
+    expect(res.status).toBe(204);
+    const after = await list();
+    expect(after.body.items.map((i) => i.movieId)).toEqual(['m3']);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const as = (u) => ({
+  add: (movieId) => request(app).post('/watchlist').set('x-user-id', u).send({ movieId }),
+  list: () => request(app).get('/watchlist').set('x-user-id', u),
+  del: (movieId) => request(app).delete(`/watchlist/${movieId}`).set('x-user-id', u),
+});
+
+describe('hidden', () => {
+  test('removing a movie not in the list → 404', async () => {
+    const a = as('a');
+    await a.add('m1');
+    const res = await a.del('m4');
+    expect(res.status).toBe(404);
+  });
+
+  test('lists are per user', async () => {
+    await as('a').add('m1');
+    const res = await as('b').list();
+    expect(res.body.items).toHaveLength(0);
+  });
+
+  test('can re-add after removing', async () => {
+    const a = as('a');
+    await a.add('m2');
+    await a.del('m2');
+    const res = await a.add('m2');
+    expect(res.status).toBe(201);
+  });
+
+  test('a 409 does not change the list', async () => {
+    const a = as('a');
+    await a.add('m1');
+    await a.add('m2');
+    await a.add('m1');
+    const res = await a.list();
+    expect(res.body.items.map((i) => i.movieId)).toEqual(['m1', 'm2']);
+  });
+
+  test('missing x-user-id → 401', async () => {
+    const res = await request(app).get('/watchlist');
+    expect(res.status).toBe(401);
+  });
+});
+@@@ solution/src/controllers/watchlistController.js
+const service = require('../services/watchlistService');
+const movieRepo = require('../repositories/movieRepo');
+
+exports.get = async (req, res) => {
+  res.json(await service.getList(req.userId));
+};
+
+exports.add = async (req, res) => {
+  const { movieId } = req.body;
+  const movie = await movieRepo.findById(movieId);
+  if (!movie) {
+    return res.status(404).json({ error: 'movie not found' });
+  }
+  const list = await service.addMovie(req.userId, movieId);
+  res.status(201).json(list);
+};
+
+exports.remove = async (req, res) => {
+  await service.removeMovie(req.userId, req.params.movieId);
+  res.status(204).end();
+};
+@@@ solution/src/services/watchlistService.js
+const repo = require('../repositories/watchlistRepo');
+const movieRepo = require('../repositories/movieRepo');
+const { ConflictError, NotFoundError } = require('../errors');
+
+async function getList(userId) {
+  const wl = await repo.getOrCreate(userId);
+  const items = await Promise.all(wl.items.map(async (i) => {
+    const movie = await movieRepo.findById(i.movieId);
+    return { ...i, title: movie ? movie.title : null };
+  }));
+  return { items };
+}
+
+async function addMovie(userId, movieId) {
+  const wl = await repo.getOrCreate(userId);
+  if (wl.items.some((i) => i.movieId === movieId)) {
+    throw new ConflictError('movie already in watch list');
+  }
+  wl.items.push({ movieId, addedAt: Date.now() });
+  await repo.save(wl);
+  return getList(userId);
+}
+
+async function removeMovie(userId, movieId) {
+  const wl = await repo.getOrCreate(userId);
+  const before = wl.items.length;
+  wl.items = wl.items.filter((i) => i.movieId !== movieId);
+  if (wl.items.length === before) throw new NotFoundError('movie not in watch list');
+  await repo.save(wl);
+}
+
+module.exports = { getList, addMovie, removeMovie };

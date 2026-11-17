@@ -1,0 +1,167 @@
+@@@ meta.json
+{
+  "id": "m6",
+  "difficulty": "medium",
+  "title": "Clinic appointment booking",
+  "minutes": 30,
+  "tagline": "Back-to-back slots clash, one doctor's booking blocks another, and cancelled slots stay taken.",
+  "tags": ["interval overlap", "scoped queries", "status filters"],
+  "lookFor": [
+    "Two half-open intervals [s1,e1) and [s2,e2) overlap iff `s1 < e2 && s2 < e1`. Strict `<`: touching isn't overlapping.",
+    "Conflict checks must be scoped (same doctor/room/resource). Check the query filter.",
+    "Status-based soft states ('cancelled') must be excluded from conflict checks.",
+    "Validate the interval itself: start < end."
+  ],
+  "bugs": [
+    {
+      "symptom": "10:30–11:00 clashes with 10:00–10:30",
+      "file": "src/booking.js",
+      "hints": ["Plug start=630,end=660 and existing 600–630 into the overlap condition."],
+      "cause": "`<=` makes touching intervals count as overlapping.",
+      "fix": "`a.start < b.end && b.start < a.end`",
+      "pattern": "Inclusive interval bounds"
+    },
+    {
+      "symptom": "Dr. Rao can't take a slot Dr. Iyer has booked",
+      "file": "src/booking.js",
+      "hints": ["Which appointments does the conflict check look at?"],
+      "cause": "The conflict query loads every active appointment, not just this doctor's.",
+      "fix": "`appts.find({ doctorId, status: 'booked' })`",
+      "pattern": "Unscoped query"
+    },
+    {
+      "symptom": "A cancelled slot still can't be rebooked",
+      "file": "src/booking.js",
+      "hints": ["Does the conflict query care about status?"],
+      "cause": "Cancelled appointments are still loaded and treated as conflicts.",
+      "fix": "Filter `status: 'booked'`.",
+      "pattern": "Soft state not filtered"
+    },
+    {
+      "symptom": "(hidden) end before start is accepted",
+      "file": "src/booking.js",
+      "hints": ["Is the interval itself validated?"],
+      "cause": "No `start < end` check.",
+      "fix": "`if (!(Number.isInteger(start) && Number.isInteger(end) && start < end)) throw new HttpError(400, ...)`",
+      "pattern": "Missing validation"
+    }
+  ]
+}
+@@@ ticket.md
+# CLINIC-12: Booking says 'slot taken' when it isn't
+
+Times are **minutes since midnight** (600 = 10:00). Intervals are `[start, end)`: an appointment ending at 630 and one starting at 630 don't clash.
+
+| Method | Path | Behaviour |
+|---|---|---|
+| `POST` | `/appointments { doctorId, start, end }` | **201**. Clash with the **same doctor's** booked appointment → **409**. Bad interval → **400** |
+| `POST` | `/appointments/:id/cancel` | **200**, frees the slot |
+@@@ repo/package.json
+{ "name": "clinic", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/app.js
+const express = require('express');
+const booking = require('./booking');
+
+const app = express();
+app.use(express.json());
+
+app.post('/appointments', async (req, res) => {
+  res.status(201).json(await booking.book(req.body));
+});
+app.post('/appointments/:id/cancel', async (req, res) => {
+  res.json(await booking.cancel(req.params.id));
+});
+app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
+
+module.exports = app;
+@@@ repo/src/booking.js
+const db = require('memdb');
+const appts = db.collection('appointments');
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+const overlaps = (a, b) => a.start <= b.end && b.start <= a.end;
+
+async function book({ doctorId, start, end }) {
+  if (!doctorId) throw new HttpError(400, 'doctorId is required');
+  const existing = await appts.find({});
+  if (existing.some((e) => overlaps(e, { start, end }))) throw new HttpError(409, 'slot taken');
+  return appts.insert({ doctorId, start, end, status: 'booked' });
+}
+
+async function cancel(id) {
+  const a = await appts.findById(id);
+  if (!a) throw new HttpError(404, 'not found');
+  return appts.updateById(id, { status: 'cancelled' });
+}
+
+module.exports = { book, cancel };
+@@@ repo/tests/booking.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const book = (doctorId, start, end) => request(app).post('/appointments').send({ doctorId, start, end });
+
+describe('Booking', () => {
+  test('back-to-back slots are fine', async () => {
+    expect((await book('iyer', 600, 630)).status).toBe(201);
+    expect((await book('iyer', 630, 660)).status).toBe(201);
+  });
+  test('real overlap → 409', async () => {
+    await book('iyer', 600, 660);
+    expect((await book('iyer', 630, 690)).status).toBe(409);
+  });
+  test('different doctors don\'t clash', async () => {
+    await book('iyer', 600, 630);
+    expect((await book('rao', 600, 630)).status).toBe(201);
+  });
+  test('cancelled slot can be rebooked', async () => {
+    const a = await book('iyer', 600, 630);
+    await request(app).post(`/appointments/${a.body._id}/cancel`);
+    expect((await book('iyer', 600, 630)).status).toBe(201);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const book = (doctorId, start, end) => request(app).post('/appointments').send({ doctorId, start, end });
+
+describe('hidden', () => {
+  test('end before start → 400', async () => { expect((await book('iyer', 700, 650)).status).toBe(400); });
+  test('zero-length → 400', async () => { expect((await book('iyer', 700, 700)).status).toBe(400); });
+  test('fully inside an existing slot → 409', async () => {
+    await book('iyer', 600, 720);
+    expect((await book('iyer', 630, 660)).status).toBe(409);
+  });
+  test('ending exactly when another starts is fine', async () => {
+    await book('iyer', 630, 660);
+    expect((await book('iyer', 600, 630)).status).toBe(201);
+  });
+  test('cancel unknown → 404', async () => {
+    expect((await request(app).post('/appointments/nope/cancel')).status).toBe(404);
+  });
+});
+@@@ solution/src/booking.js
+const db = require('memdb');
+const appts = db.collection('appointments');
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+const overlaps = (a, b) => a.start < b.end && b.start < a.end;
+
+async function book({ doctorId, start, end }) {
+  if (!doctorId) throw new HttpError(400, 'doctorId is required');
+  if (!(Number.isInteger(start) && Number.isInteger(end) && start < end)) throw new HttpError(400, 'invalid interval');
+  const existing = await appts.find({ doctorId, status: 'booked' });
+  if (existing.some((e) => overlaps(e, { start, end }))) throw new HttpError(409, 'slot taken');
+  return appts.insert({ doctorId, start, end, status: 'booked' });
+}
+
+async function cancel(id) {
+  const a = await appts.findById(id);
+  if (!a) throw new HttpError(404, 'not found');
+  return appts.updateById(id, { status: 'cancelled' });
+}
+
+module.exports = { book, cancel };

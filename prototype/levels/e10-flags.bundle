@@ -1,0 +1,142 @@
+@@@ meta.json
+{
+  "id": "e10",
+  "difficulty": "easy",
+  "title": "Feature flag service",
+  "minutes": 15,
+  "tagline": "'false' is truthy, unknown flags crash, and a 0% rollout reaches a lot of people.",
+  "tags": ["truthy strings", "missing keys", "modulo of negatives"],
+  "lookFor": [
+    "Config from env vars or files is often strings. `'false'` is truthy.",
+    "Looking up a key that might not exist? Handle `undefined` before reading properties off it.",
+    "In JS, `-25 % 100` is `-25`, not 75. Hashes can be negative. Use `>>> 0` or `Math.abs`."
+  ],
+  "bugs": [
+    {
+      "symptom": "A flag set to 'false' is on",
+      "file": "src/flags.js",
+      "hints": ["Look at how `enabled` is stored in config.js. What type is it?"],
+      "cause": "Config values come in as strings. `!'false'` is false, so the 'disabled' check never fires.",
+      "fix": "`const on = flag.enabled === true || flag.enabled === 'true'; if (!on) return false;`",
+      "pattern": "Truthy string 'false'"
+    },
+    {
+      "symptom": "Unknown flag → 500",
+      "file": "src/flags.js",
+      "hints": ["What is `FLAGS['nope']`?"],
+      "cause": "Reading `.enabled` off `undefined` throws.",
+      "fix": "`if (!flag) return false;`",
+      "pattern": "Missing key not handled"
+    },
+    {
+      "symptom": "A 0% rollout enables users anyway",
+      "file": "src/flags.js",
+      "hints": ["Log `bucket` for user-1. Can it be negative?"],
+      "cause": "The hash uses `| 0`, which can go negative, and `%` keeps the sign. Negative buckets are always `< rollout`.",
+      "fix": "`const bucket = (hash(userId) >>> 0) % 100;`",
+      "pattern": "Negative modulo"
+    }
+  ]
+}
+@@@ ticket.md
+# FLAG-9: Flags leak to users who shouldn't see them
+
+`GET /flags/:name?userId=` → `{ flag, enabled }`
+
+* A flag is on for a user if it's **enabled** and the user's bucket (0–99, stable per user) is **below** `rollout`.
+* `enabled` may arrive as a boolean or the strings `'true'`/`'false'` (it comes from env config).
+* Unknown flag → `{ enabled: false }` (200, never an error).
+@@@ repo/package.json
+{ "name": "flags", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/config.js
+// Loaded from environment variables in prod, so values can be strings.
+module.exports = {
+  'new-checkout': { enabled: 'false', rollout: 100 },
+  'dark-mode': { enabled: 'true', rollout: 50 },
+  'beta-search': { enabled: true, rollout: 0 },
+  'everyone': { enabled: true, rollout: 100 },
+};
+@@@ repo/src/flags.js
+const FLAGS = require('./config');
+
+function hash(s) {
+  return [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
+}
+
+function isEnabled(name, userId) {
+  const flag = FLAGS[name];
+  if (!flag.enabled) return false;
+  const bucket = hash(String(userId)) % 100;
+  return bucket < flag.rollout;
+}
+
+module.exports = { isEnabled, hash };
+@@@ repo/src/app.js
+const express = require('express');
+const { isEnabled } = require('./flags');
+
+const app = express();
+app.get('/flags/:name', (req, res) => {
+  res.json({ flag: req.params.name, enabled: isEnabled(req.params.name, req.query.userId || '') });
+});
+
+module.exports = app;
+@@@ repo/tests/flags.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const check = (name, userId) => request(app).get(`/flags/${name}?userId=${userId}`);
+const users = Array.from({ length: 20 }, (_, i) => `user-${i + 1}`);
+
+describe('Flags', () => {
+  test("enabled: 'false' means off", async () => {
+    expect((await check('new-checkout', 'alice')).body.enabled).toBe(false);
+  });
+  test('unknown flag is off, not an error', async () => {
+    const res = await check('does-not-exist', 'alice');
+    expect(res.status).toBe(200);
+    expect(res.body.enabled).toBe(false);
+  });
+  test('0% rollout reaches nobody', async () => {
+    for (const u of users) expect((await check('beta-search', u)).body.enabled).toBe(false);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const check = (name, userId) => request(app).get(`/flags/${name}?userId=${userId}`);
+
+describe('hidden', () => {
+  test('100% rollout reaches everyone', async () => {
+    for (let i = 1; i <= 20; i++) expect((await check('everyone', `user-${i}`)).body.enabled).toBe(true);
+  });
+  test('50% rollout uses non-negative buckets', async () => {
+    expect((await check('dark-mode', 'user-1')).body.enabled).toBe(false);
+    expect((await check('dark-mode', 'user-10')).body.enabled).toBe(true);
+    expect((await check('dark-mode', 'alice')).body.enabled).toBe(true);
+    expect((await check('dark-mode', 'dave')).body.enabled).toBe(false);
+  });
+  test('same user → same answer', async () => {
+    const a = (await check('dark-mode', 'erin')).body.enabled;
+    const b = (await check('dark-mode', 'erin')).body.enabled;
+    expect(a).toBe(b);
+  });
+});
+@@@ solution/src/flags.js
+const FLAGS = require('./config');
+
+function hash(s) {
+  return [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
+}
+
+function isEnabled(name, userId) {
+  const flag = FLAGS[name];
+  if (!flag) return false;
+  const on = flag.enabled === true || flag.enabled === 'true';
+  if (!on) return false;
+  const bucket = (hash(String(userId)) >>> 0) % 100;
+  return bucket < flag.rollout;
+}
+
+module.exports = { isEnabled, hash };

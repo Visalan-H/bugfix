@@ -1,0 +1,242 @@
+@@@ meta.json
+{
+  "id": "h5",
+  "difficulty": "hard",
+  "title": "Cinema seat holds",
+  "minutes": 45,
+  "tagline": "Two people hold the same seat, half-failed holds keep seats locked, expired holds never release, and late confirms go through.",
+  "tags": ["concurrency", "atomic updates", "rollback", "expiry"],
+  "lookFor": [
+    "Check-then-write across awaits is a race. Make each seat claim one atomic conditional update.",
+    "Multi-item claims: if seat 3 fails, release seats 1–2 you already took.",
+    "Time-based states (holds, leases) must count as free once expired. Compare against the clock.",
+    "Confirming something time-limited: check it's still valid at confirm time."
+  ],
+  "bugs": [
+    {
+      "symptom": "Two concurrent holds both get seat A1",
+      "file": "src/seats.js",
+      "hints": ["Both requests read 'free' before either writes. Is there an atomic helper you could use?"],
+      "cause": "The code loads the seats, checks they're free, then updates them. Concurrent requests interleave between the check and the write.",
+      "fix": "Per seat: `seats.findOneAndUpdate({ _id, status: 'free' }, { $set: { status: 'held', holdId, heldUntil } })`. null means taken.",
+      "pattern": "Check-then-act race"
+    },
+    {
+      "symptom": "Failed hold leaves earlier seats held",
+      "file": "src/seats.js",
+      "hints": ["If A2 is taken, what happened to A1 in this request?"],
+      "cause": "Seats are claimed one by one with no rollback, so a 409 leaves a partial hold behind.",
+      "fix": "Track claimed seats; on failure set them back to `free` and rethrow.",
+      "pattern": "Partial write without rollback"
+    },
+    {
+      "symptom": "Expired holds block seats forever",
+      "file": "src/seats.js",
+      "hints": ["When is a 'held' seat actually available?"],
+      "cause": "Only `status: 'free'` counts as available. Expired holds are never released.",
+      "fix": "Also try `findOneAndUpdate({ _id, status: 'held', heldUntil: { $lte: now } }, …)`",
+      "pattern": "Expiry not enforced"
+    },
+    {
+      "symptom": "(hidden) Confirming an expired hold succeeds",
+      "file": "src/seats.js",
+      "hints": ["Does confirm check heldUntil?"],
+      "cause": "Confirm only checks the holdId, not the time, so a stale hold can book seats someone else now holds.",
+      "fix": "Confirm only seats `{ holdId, status: 'held', heldUntil: { $gt: now } }`; if any are missing → 410.",
+      "pattern": "Missing expiry check on commit"
+    }
+  ]
+}
+@@@ ticket.md
+# CINE-99: Double-booked seats
+
+Show `s1` has seats `A1`–`A5`. Header `x-user-id`. Holds last **5 minutes**.
+
+| Method | Path | Behaviour |
+|---|---|---|
+| `POST` | `/shows/:id/holds { seats }` | All-or-nothing. **201** `{ holdId }`. Any seat unavailable → **409** and **no** seat changes |
+| `POST` | `/holds/:holdId/confirm` | **200** → seats `booked`. Hold expired → **410** |
+| `GET` | `/shows/:id/seats` | `[{ seat, status }]` where expired holds show as `free` |
+
+`memdb.findOneAndUpdate` checks and changes a row in ONE step, so two requests can't both get in. Tests move time with `src/clock.js`.
+@@@ repo/package.json
+{ "name": "cinema", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/clock.js
+let t = Date.UTC(2026, 4, 1, 18, 0, 0);
+module.exports = { now: () => t, advance: (ms) => { t += ms; } };
+@@@ repo/src/seats.js
+const db = require('memdb');
+const clock = require('./clock');
+
+const seats = db.collection('seats');
+const HOLD_MS = 5 * 60 * 1000;
+const ready = Promise.all(['A1', 'A2', 'A3', 'A4', 'A5'].map((s) =>
+  seats.insert({ _id: `s1-${s}`, showId: 's1', seat: s, status: 'free', holdId: null, heldUntil: null })));
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+let holdSeq = 0;
+
+async function hold(showId, userId, wanted) {
+  await ready;
+  if (!Array.isArray(wanted) || !wanted.length) throw new HttpError(400, 'seats required');
+  const holdId = `h${++holdSeq}`;
+  const heldUntil = clock.now() + HOLD_MS;
+
+  for (const s of wanted) {
+    const seat = await seats.findById(`${showId}-${s}`);
+    if (!seat || seat.status !== 'free') throw new HttpError(409, `${s} is not available`);
+    await seats.updateById(seat._id, { status: 'held', holdId, heldUntil, userId });
+  }
+  return { holdId };
+}
+
+async function confirm(holdId) {
+  await ready;
+  const held = await seats.find({ holdId, status: 'held' });
+  if (!held.length) throw new HttpError(404, 'hold not found');
+  for (const s of held) await seats.updateById(s._id, { status: 'booked' });
+  return { booked: held.map((s) => s.seat) };
+}
+
+async function list(showId) {
+  await ready;
+  const now = clock.now();
+  return (await seats.find({ showId })).map((s) => ({
+    seat: s.seat,
+    status: s.status === 'held' && s.heldUntil <= now ? 'free' : s.status,
+  }));
+}
+
+module.exports = { hold, confirm, list };
+@@@ repo/src/app.js
+const express = require('express');
+const svc = require('./seats');
+
+const app = express();
+app.use(express.json());
+app.post('/shows/:id/holds', async (req, res) => {
+  res.status(201).json(await svc.hold(req.params.id, req.get('x-user-id'), req.body.seats));
+});
+app.post('/holds/:id/confirm', async (req, res) => res.json(await svc.confirm(req.params.id)));
+app.get('/shows/:id/seats', async (req, res) => res.json(await svc.list(req.params.id)));
+app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
+
+module.exports = app;
+@@@ repo/tests/seats.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const clock = require('../src/clock');
+
+const hold = (user, seats) => request(app).post('/shows/s1/holds').set('x-user-id', user).send({ seats });
+const status = async () => Object.fromEntries((await request(app).get('/shows/s1/seats')).body.map((s) => [s.seat, s.status]));
+
+describe('Seat holds', () => {
+  test('concurrent holds on the same seat: exactly one wins', async () => {
+    const [a, b] = await Promise.all([hold('u1', ['A1']), hold('u2', ['A1'])]);
+    expect([a.status, b.status].sort()).toEqual([201, 409]);
+  });
+  test('a failed hold changes nothing', async () => {
+    await hold('u1', ['A3']);
+    const res = await hold('u2', ['A2', 'A3']);
+    expect(res.status).toBe(409);
+    expect((await status()).A2).toBe('free');
+  });
+  test('expired holds are released', async () => {
+    await hold('u1', ['A4']);
+    clock.advance(6 * 60 * 1000);
+    expect((await hold('u2', ['A4'])).status).toBe(201);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const clock = require('../src/clock');
+
+const hold = (user, seats) => request(app).post('/shows/s1/holds').set('x-user-id', user).send({ seats });
+const confirm = (id) => request(app).post(`/holds/${id}/confirm`);
+
+describe('hidden', () => {
+  test('confirm within 5 minutes books the seats', async () => {
+    const h = await hold('u1', ['A1', 'A2']);
+    clock.advance(4 * 60 * 1000);
+    expect((await confirm(h.body.holdId)).status).toBe(200);
+    expect((await hold('u2', ['A1'])).status).toBe(409);
+  });
+  test('confirm after expiry → 410', async () => {
+    const h = await hold('u1', ['A5']);
+    clock.advance(6 * 60 * 1000);
+    expect((await confirm(h.body.holdId)).status).toBe(410);
+  });
+  test('stale confirm cannot steal a re-held seat', async () => {
+    const h1 = await hold('u1', ['A5']);
+    clock.advance(6 * 60 * 1000);
+    const h2 = await hold('u2', ['A5']);
+    expect(h2.status).toBe(201);
+    await confirm(h1.body.holdId);
+    expect((await confirm(h2.body.holdId)).status).toBe(200);
+  });
+  test('5 concurrent holds on overlapping seats never double-hold', async () => {
+    const reqs = [['A1', 'A2'], ['A2', 'A3'], ['A3', 'A4'], ['A4', 'A5'], ['A5', 'A1']];
+    const rs = await Promise.all(reqs.map((s, i) => hold(`u${i}`, s)));
+    const won = rs.map((r, i) => (r.status === 201 ? reqs[i] : [])).flat();
+    expect(new Set(won).size).toBe(won.length);
+  });
+});
+@@@ solution/src/seats.js
+const db = require('memdb');
+const clock = require('./clock');
+
+const seats = db.collection('seats');
+const HOLD_MS = 5 * 60 * 1000;
+const ready = Promise.all(['A1', 'A2', 'A3', 'A4', 'A5'].map((s) =>
+  seats.insert({ _id: `s1-${s}`, showId: 's1', seat: s, status: 'free', holdId: null, heldUntil: null })));
+
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+let holdSeq = 0;
+
+async function claim(id, patch) {
+  const now = clock.now();
+  return (await seats.findOneAndUpdate({ _id: id, status: 'free' }, { $set: patch }))
+    || seats.findOneAndUpdate({ _id: id, status: 'held', heldUntil: { $lte: now } }, { $set: patch });
+}
+
+async function hold(showId, userId, wanted) {
+  await ready;
+  if (!Array.isArray(wanted) || !wanted.length) throw new HttpError(400, 'seats required');
+  const holdId = `h${++holdSeq}`;
+  const heldUntil = clock.now() + HOLD_MS;
+  const taken = [];
+  try {
+    for (const s of wanted) {
+      const ok = await claim(`${showId}-${s}`, { status: 'held', holdId, heldUntil, userId });
+      if (!ok) throw new HttpError(409, `${s} is not available`);
+      taken.push(ok._id);
+    }
+  } catch (err) {
+    for (const id of taken) {
+      await seats.findOneAndUpdate({ _id: id, holdId }, { $set: { status: 'free', holdId: null, heldUntil: null } });
+    }
+    throw err;
+  }
+  return { holdId };
+}
+
+async function confirm(holdId) {
+  await ready;
+  const mine = await seats.find({ holdId, status: 'held' });
+  if (!mine.length) throw new HttpError(410, 'hold expired or not found');
+  if (mine.some((s) => s.heldUntil <= clock.now())) throw new HttpError(410, 'hold expired');
+  for (const s of mine) await seats.findOneAndUpdate({ _id: s._id, holdId }, { $set: { status: 'booked' } });
+  return { booked: mine.map((s) => s.seat) };
+}
+
+async function list(showId) {
+  await ready;
+  const now = clock.now();
+  return (await seats.find({ showId })).map((s) => ({
+    seat: s.seat,
+    status: s.status === 'held' && s.heldUntil <= now ? 'free' : s.status,
+  }));
+}
+
+module.exports = { hold, confirm, list };

@@ -1,0 +1,194 @@
+@@@ meta.json
+{
+  "id": "m11",
+  "difficulty": "medium",
+  "title": "Storage quota",
+  "minutes": 30,
+  "tagline": "Uploads blow past the quota, deletes never free space, and re-uploading a file counts it twice.",
+  "tags": ["quota math", "unsaved counters", "replace semantics"],
+  "lookFor": [
+    "A quota check must include the NEW item: `used + size > quota`.",
+    "Counters (`usedKb`) must be changed in the DB, ideally atomically with `$inc`.",
+    "'Replace' semantics: subtract the old size before adding the new one.",
+    "Exactly filling the quota is allowed unless the spec says otherwise."
+  ],
+  "bugs": [
+    {
+      "symptom": "Upload that would exceed the quota is accepted",
+      "file": "src/storage.js",
+      "hints": ["Does the check consider the size of the file being uploaded?"],
+      "cause": "`usedKb > QUOTA` only checks the current usage, so any upload fits as long as you're not over yet.",
+      "fix": "`if (usedKb - oldSize + sizeKb > QUOTA_KB) throw …`",
+      "pattern": "Quota check ignores the new item"
+    },
+    {
+      "symptom": "Deleting a file doesn't free space",
+      "file": "src/storage.js",
+      "hints": ["Where is `usage.usedKb -= file.sizeKb` written to?"],
+      "cause": "The decrement mutates the fetched copy and is never persisted.",
+      "fix": "`await usage.findOneAndUpdate({ _id: userId }, { $inc: { usedKb: -file.sizeKb } })`",
+      "pattern": "Mutated, never saved"
+    },
+    {
+      "symptom": "(hidden) Re-uploading the same name double-counts",
+      "file": "src/storage.js",
+      "hints": ["When a file with that name exists, how much should usedKb change by?"],
+      "cause": "Replacing a file adds the full new size without removing the old one.",
+      "fix": "Find the existing file; the delta is `sizeKb - (existing ? existing.sizeKb : 0)`.",
+      "pattern": "Replace counted as add"
+    }
+  ]
+}
+@@@ ticket.md
+# DRIVE-3: Quota is wrong
+
+Quota: **1024 KB per user**. Header `x-user-id`.
+
+| Method | Path | Behaviour |
+|---|---|---|
+| `PUT` | `/files/:name { sizeKb }` | Create or **replace** a file. **201**. Would exceed quota → **413** (nothing changes). Exactly 1024 is OK |
+| `DELETE` | `/files/:name` | **204**, frees its space. Unknown → **404** |
+| `GET` | `/usage` | `{ usedKb, quotaKb }` |
+@@@ repo/package.json
+{ "name": "drive", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/storage.js
+const db = require('memdb');
+const files = db.collection('files');
+const usage = db.collection('usage');
+
+const QUOTA_KB = 1024;
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+async function getUsage(userId) {
+  return (await usage.findById(userId)) || usage.insert({ _id: userId, usedKb: 0 });
+}
+
+async function put(userId, name, sizeKb) {
+  if (!Number.isInteger(sizeKb) || sizeKb <= 0) throw new HttpError(400, 'sizeKb must be a positive integer');
+  const u = await getUsage(userId);
+  if (u.usedKb > QUOTA_KB) throw new HttpError(413, 'quota exceeded');
+
+  const existing = await files.findOne({ userId, name });
+  if (existing) await files.updateById(existing._id, { sizeKb });
+  else await files.insert({ userId, name, sizeKb });
+  await usage.findOneAndUpdate({ _id: userId }, { $inc: { usedKb: sizeKb } });
+}
+
+async function remove(userId, name) {
+  const file = await files.findOne({ userId, name });
+  if (!file) throw new HttpError(404, 'not found');
+  await files.deleteById(file._id);
+  const u = await getUsage(userId);
+  u.usedKb -= file.sizeKb;
+}
+
+async function report(userId) {
+  const u = await getUsage(userId);
+  return { usedKb: u.usedKb, quotaKb: QUOTA_KB };
+}
+
+module.exports = { put, remove, report };
+@@@ repo/src/app.js
+const express = require('express');
+const s = require('./storage');
+
+const app = express();
+app.use(express.json());
+app.put('/files/:name', async (req, res) => {
+  await s.put(req.get('x-user-id'), req.params.name, req.body.sizeKb);
+  res.status(201).json(await s.report(req.get('x-user-id')));
+});
+app.delete('/files/:name', async (req, res) => {
+  await s.remove(req.get('x-user-id'), req.params.name);
+  res.status(204).end();
+});
+app.get('/usage', async (req, res) => res.json(await s.report(req.get('x-user-id'))));
+app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
+
+module.exports = app;
+@@@ repo/tests/quota.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const put = (name, sizeKb) => request(app).put(`/files/${name}`).set('x-user-id', 'u1').send({ sizeKb });
+const usage = async () => (await request(app).get('/usage').set('x-user-id', 'u1')).body.usedKb;
+
+describe('Quota', () => {
+  test('upload over quota → 413', async () => {
+    await put('a.mp4', 1000);
+    expect((await put('b.png', 100)).status).toBe(413);
+    expect(await usage()).toBe(1000);
+  });
+  test('delete frees space', async () => {
+    await put('a.mp4', 600);
+    await request(app).delete('/files/a.mp4').set('x-user-id', 'u1');
+    expect(await usage()).toBe(0);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const put = (name, sizeKb, u = 'u1') => request(app).put(`/files/${name}`).set('x-user-id', u).send({ sizeKb });
+const usage = async (u = 'u1') => (await request(app).get('/usage').set('x-user-id', u)).body.usedKb;
+
+describe('hidden', () => {
+  test('replacing a file adjusts by the difference', async () => {
+    await put('doc.pdf', 300);
+    await put('doc.pdf', 500);
+    expect(await usage()).toBe(500);
+  });
+  test('exactly filling the quota is OK', async () => {
+    await put('a', 1000);
+    expect((await put('b', 24)).status).toBe(201);
+  });
+  test('replacing with a smaller file when full', async () => {
+    await put('a', 1024);
+    expect((await put('a', 10)).status).toBe(201);
+    expect(await usage()).toBe(10);
+  });
+  test('users have separate quotas', async () => {
+    await put('a', 1024, 'u1');
+    expect((await put('a', 1024, 'u2')).status).toBe(201);
+  });
+  test('delete unknown → 404', async () => {
+    expect((await request(app).delete('/files/nope').set('x-user-id', 'u1')).status).toBe(404);
+  });
+});
+@@@ solution/src/storage.js
+const db = require('memdb');
+const files = db.collection('files');
+const usage = db.collection('usage');
+
+const QUOTA_KB = 1024;
+class HttpError extends Error { constructor(status, m) { super(m); this.status = status; } }
+
+async function getUsage(userId) {
+  return (await usage.findById(userId)) || usage.insert({ _id: userId, usedKb: 0 });
+}
+
+async function put(userId, name, sizeKb) {
+  if (!Number.isInteger(sizeKb) || sizeKb <= 0) throw new HttpError(400, 'sizeKb must be a positive integer');
+  const u = await getUsage(userId);
+  const existing = await files.findOne({ userId, name });
+  const delta = sizeKb - (existing ? existing.sizeKb : 0);
+  if (u.usedKb + delta > QUOTA_KB) throw new HttpError(413, 'quota exceeded');
+
+  if (existing) await files.updateById(existing._id, { sizeKb });
+  else await files.insert({ userId, name, sizeKb });
+  await usage.findOneAndUpdate({ _id: userId }, { $inc: { usedKb: delta } });
+}
+
+async function remove(userId, name) {
+  const file = await files.findOne({ userId, name });
+  if (!file) throw new HttpError(404, 'not found');
+  await files.deleteById(file._id);
+  await usage.findOneAndUpdate({ _id: userId }, { $inc: { usedKb: -file.sizeKb } });
+}
+
+async function report(userId) {
+  const u = await getUsage(userId);
+  return { usedKb: u.usedKb, quotaKb: QUOTA_KB };
+}
+
+module.exports = { put, remove, report };

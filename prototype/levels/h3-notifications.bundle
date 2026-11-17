@@ -1,0 +1,346 @@
+@@@ meta.json
+{
+  "id": "h3",
+  "difficulty": "hard",
+  "title": "Notifications: cursors, soft deletes & async forEach",
+  "minutes": 40,
+  "tagline": "Infinite scroll shows duplicates, 'mark all read' half-works, deleted items still count, and anyone can delete anything.",
+  "tags": ["cursor pagination", "async loops", "soft delete", "IDOR"],
+  "lookFor": [
+    "Cursor pagination: the next page starts strictly AFTER the cursor. `$lt`/`$gt`, never `$lte`/`$gte`.",
+    "`array.forEach(async …)` does not wait for anything. Use `for…of` with await, or `Promise.all(map)`.",
+    "Soft delete means EVERY read path must filter `deletedAt: null`: lists, counts, lookups.",
+    "Every `/:id` mutation: does it check the record belongs to the caller?",
+    "nextCursor must be null when there's nothing left, or clients loop forever on empty pages."
+  ],
+  "bugs": [
+    {
+      "symptom": "Page 2 repeats the last item of page 1",
+      "file": "src/repositories/notificationRepo.js",
+      "hints": [
+        "nextCursor is the seq of the last item shown. Should page 2 include that seq?"
+      ],
+      "cause": "`seq: { $lte: cursor }` includes the cursor item itself, so each page boundary item shows up twice.",
+      "fix": "`seq: { $lt: cursor }`",
+      "pattern": "Inclusive cursor"
+    },
+    {
+      "symptom": "Unread count includes deleted notifications",
+      "file": "src/repositories/notificationRepo.js",
+      "hints": [
+        "Compare the filter in `list` with the filter in `countUnread`."
+      ],
+      "cause": "`countUnread` forgets `deletedAt: null`, so soft-deleted items still bump the badge.",
+      "fix": "`items.count({ userId, read: false, deletedAt: null })`",
+      "pattern": "Soft-delete filter missing on one read path"
+    },
+    {
+      "symptom": "'Mark all read' leaves unread items",
+      "file": "src/services/notificationService.js",
+      "hints": [
+        "What does `forEach` do with the Promise your async callback returns?"
+      ],
+      "cause": "`unread.forEach(async (n) => await repo.markRead(n._id))` fires the writes and returns immediately. The response goes out (and the next request reads) before they finish.",
+      "fix": "`await Promise.all(unread.map((n) => repo.markRead(n._id)));` (or a single updateMany)",
+      "pattern": "async forEach"
+    },
+    {
+      "symptom": "nextCursor is set on the last page",
+      "file": "src/services/notificationService.js",
+      "hints": [
+        "How do you know there's another page if you only fetched `limit` rows?"
+      ],
+      "cause": "`nextCursor` is always the last item's seq, even when nothing is left, so clients request one more empty page forever.",
+      "fix": "Fetch `limit + 1` rows; `hasMore = rows.length > limit`; return `rows.slice(0, limit)` and `nextCursor = hasMore ? last.seq : null`.",
+      "pattern": "Missing 'has more' check"
+    },
+    {
+      "symptom": "(hidden) Users can delete other users' notifications",
+      "file": "src/services/notificationService.js",
+      "hints": [
+        "remove(userId, id): is userId used at all?"
+      ],
+      "cause": "`remove` soft-deletes by id without checking `n.userId === userId`. That's an IDOR.",
+      "fix": "`if (!n || n.userId !== userId || n.deletedAt !== null) throw new NotFoundError(...)`",
+      "pattern": "Missing ownership check (IDOR)"
+    }
+  ]
+}
+@@@ ticket.md
+# NOTIF-88: Notification centre bugs
+
+The mobile team reports: **infinite scroll shows duplicates**, the **red badge never clears** after "mark all as read", and **deleted notifications still count**. Also a pen-test finding about deleting other users' data.
+
+## API (header `x-user-id`)
+| Method | Path | Behaviour |
+|---|---|---|
+| `GET` | `/notifications?limit=&cursor=` | Newest first. `{ items, nextCursor }`. `nextCursor` = `null` when no more pages. Pages never overlap. Deleted items are never shown. |
+| `GET` | `/notifications/unread-count` | `{ count }`, excluding deleted |
+| `POST` | `/notifications/read-all` | Marks all of the caller's notifications read before responding. `{ updated }` |
+| `DELETE` | `/notifications/:id` | Soft delete, **204**. Not yours / unknown / already deleted → **404** |
+
+Tests create notifications with `notificationService.notify(userId, text)`. Each gets an increasing `seq`.
+@@@ repo/package.json
+{
+  "name": "notification-centre",
+  "version": "5.2.0",
+  "scripts": { "test": "jest" },
+  "dependencies": { "express": "^5.0.0", "memdb": "1.0.0" },
+  "devDependencies": { "jest": "^29.0.0", "supertest": "^7.0.0" }
+}
+@@@ repo/src/app.js
+const express = require('express');
+const routes = require('./routes/notifications');
+const errorHandler = require('./middleware/errorHandler');
+
+const app = express();
+app.use(express.json());
+app.use((req, res, next) => {
+  const id = req.get('x-user-id');
+  if (!id) return res.status(401).json({ error: 'unauthenticated' });
+  req.userId = id;
+  next();
+});
+app.use('/notifications', routes);
+app.use(errorHandler);
+
+module.exports = app;
+@@@ repo/src/errors.js
+class AppError extends Error { constructor(m, status) { super(m); this.status = status; } }
+class NotFoundError extends AppError { constructor(m = 'not found') { super(m, 404); } }
+class ValidationError extends AppError { constructor(m) { super(m, 400); } }
+
+module.exports = { NotFoundError, ValidationError };
+@@@ repo/src/middleware/errorHandler.js
+module.exports = function errorHandler(err, req, res, next) {
+  const status = err.status || 500;
+  if (status === 500) console.error(err);
+  res.status(status).json({ error: err.message });
+};
+@@@ repo/src/routes/notifications.js
+const express = require('express');
+const service = require('../services/notificationService');
+
+const router = express.Router();
+
+router.get('/', async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 20, 50);
+  const cursor = req.query.cursor !== undefined ? Number(req.query.cursor) : undefined;
+  res.json(await service.page(req.userId, { limit, cursor }));
+});
+
+router.get('/unread-count', async (req, res) => {
+  res.json({ count: await service.unreadCount(req.userId) });
+});
+
+router.post('/read-all', async (req, res) => {
+  res.json(await service.markAllRead(req.userId));
+});
+
+router.delete('/:id', async (req, res) => {
+  await service.remove(req.userId, req.params.id);
+  res.status(204).end();
+});
+
+module.exports = router;
+@@@ repo/src/services/notificationService.js
+const repo = require('../repositories/notificationRepo');
+const { NotFoundError } = require('../errors');
+
+async function notify(userId, text) {
+  return repo.create({ userId, text });
+}
+
+async function page(userId, { limit, cursor }) {
+  const rows = await repo.list(userId, { cursor, limit });
+  const last = rows[rows.length - 1];
+  return { items: rows, nextCursor: last ? last.seq : null };
+}
+
+async function unreadCount(userId) {
+  return repo.countUnread(userId);
+}
+
+async function markAllRead(userId) {
+  const unread = await repo.findUnread(userId);
+  unread.forEach(async (n) => {
+    await repo.markRead(n._id);
+  });
+  return { updated: unread.length };
+}
+
+async function remove(userId, id) {
+  const n = await repo.findById(id);
+  if (!n || n.deletedAt !== null) throw new NotFoundError('notification not found');
+  await repo.softDelete(id);
+}
+
+module.exports = { notify, page, unreadCount, markAllRead, remove };
+@@@ repo/src/repositories/notificationRepo.js
+const db = require('memdb');
+const items = db.collection('notifications');
+
+let seq = 0;
+
+exports.create = (doc) => items.insert({ ...doc, seq: ++seq, read: false, deletedAt: null });
+exports.findById = (id) => items.findById(id);
+exports.softDelete = (id) => items.updateById(id, { deletedAt: Date.now() });
+exports.markRead = (id) => items.updateById(id, { read: true });
+exports.findUnread = (userId) => items.find({ userId, read: false, deletedAt: null });
+exports.countUnread = (userId) => items.count({ userId, read: false });
+
+// Newest first. `cursor` = seq of the last item the client has seen.
+exports.list = async (userId, { cursor, limit }) => {
+  const filter = { userId, deletedAt: null };
+  if (cursor !== undefined) filter.seq = { $lte: cursor };
+  const rows = await items.find(filter);
+  return rows.sort((a, b) => b.seq - a.seq).slice(0, limit);
+};
+@@@ repo/tests/notifications.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const svc = require('../src/services/notificationService');
+
+const get = (u) => request(app).get(u).set('x-user-id', 'u1');
+const seed = async (n, user = 'u1') => { for (let i = 1; i <= n; i++) await svc.notify(user, `n${i}`); };
+
+describe('Notifications', () => {
+  test('cursor pages do not overlap', async () => {
+    await seed(5);
+    const p1 = await get('/notifications?limit=2');
+    const p2 = await get(`/notifications?limit=2&cursor=${p1.body.nextCursor}`);
+    const texts = [...p1.body.items, ...p2.body.items].map((n) => n.text);
+    expect(texts).toEqual(['n5', 'n4', 'n3', 'n2']);
+  });
+
+  test('nextCursor is null on the last page', async () => {
+    await seed(3);
+    const p1 = await get('/notifications?limit=2');
+    const p2 = await get(`/notifications?limit=2&cursor=${p1.body.nextCursor}`);
+    expect(p2.body.items.map((n) => n.text)).toEqual(['n1']);
+    expect(p2.body.nextCursor).toBeNull();
+  });
+
+  test('deleted notifications do not count as unread', async () => {
+    await seed(3);
+    const list = await get('/notifications');
+    await request(app).delete(`/notifications/${list.body.items[0]._id}`).set('x-user-id', 'u1');
+    const res = await get('/notifications/unread-count');
+    expect(res.body.count).toBe(2);
+  });
+
+  test('read-all clears the badge immediately', async () => {
+    await seed(4);
+    const r = await request(app).post('/notifications/read-all').set('x-user-id', 'u1');
+    expect(r.body.updated).toBe(4);
+    const res = await get('/notifications/unread-count');
+    expect(res.body.count).toBe(0);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const svc = require('../src/services/notificationService');
+
+const as = (u) => ({
+  get: (url) => request(app).get(url).set('x-user-id', u),
+  del: (id) => request(app).delete(`/notifications/${id}`).set('x-user-id', u),
+});
+const seed = async (n, user) => { for (let i = 1; i <= n; i++) await svc.notify(user, `${user}-${i}`); };
+
+describe('hidden', () => {
+  test('cannot delete another user\'s notification', async () => {
+    await seed(1, 'alice');
+    const a = await as('alice').get('/notifications');
+    const res = await as('mallory').del(a.body.items[0]._id);
+    expect(res.status).toBe(404);
+    const still = await as('alice').get('/notifications');
+    expect(still.body.items).toHaveLength(1);
+  });
+
+  test('deleting twice → 404', async () => {
+    await seed(1, 'u');
+    const a = await as('u').get('/notifications');
+    expect((await as('u').del(a.body.items[0]._id)).status).toBe(204);
+    expect((await as('u').del(a.body.items[0]._id)).status).toBe(404);
+  });
+
+  test('exactly limit items → nextCursor null', async () => {
+    await seed(2, 'u');
+    const p = await as('u').get('/notifications?limit=2');
+    expect(p.body.items).toHaveLength(2);
+    expect(p.body.nextCursor).toBeNull();
+  });
+
+  test('walking all pages returns every item exactly once', async () => {
+    await seed(7, 'u');
+    const seen = [];
+    let cursor = null, guard = 0;
+    do {
+      const p = await as('u').get(`/notifications?limit=3${cursor !== null ? `&cursor=${cursor}` : ''}`);
+      seen.push(...p.body.items.map((n) => n.text));
+      cursor = p.body.nextCursor;
+    } while (cursor !== null && ++guard < 10);
+    expect(seen).toHaveLength(7);
+    expect(new Set(seen).size).toBe(7);
+  });
+
+  test('other users\' notifications are not listed or counted', async () => {
+    await seed(2, 'alice');
+    await seed(3, 'bob');
+    expect((await as('alice').get('/notifications')).body.items).toHaveLength(2);
+    expect((await as('alice').get('/notifications/unread-count')).body.count).toBe(2);
+  });
+});
+@@@ solution/src/services/notificationService.js
+const repo = require('../repositories/notificationRepo');
+const { NotFoundError } = require('../errors');
+
+async function notify(userId, text) {
+  return repo.create({ userId, text });
+}
+
+async function page(userId, { limit, cursor }) {
+  const rows = await repo.list(userId, { cursor, limit: limit + 1 });
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit);
+  return { items, nextCursor: hasMore ? items[items.length - 1].seq : null };
+}
+
+async function unreadCount(userId) {
+  return repo.countUnread(userId);
+}
+
+async function markAllRead(userId) {
+  const unread = await repo.findUnread(userId);
+  await Promise.all(unread.map((n) => repo.markRead(n._id)));
+  return { updated: unread.length };
+}
+
+async function remove(userId, id) {
+  const n = await repo.findById(id);
+  if (!n || n.userId !== userId || n.deletedAt !== null) throw new NotFoundError('notification not found');
+  await repo.softDelete(id);
+}
+
+module.exports = { notify, page, unreadCount, markAllRead, remove };
+@@@ solution/src/repositories/notificationRepo.js
+const db = require('memdb');
+const items = db.collection('notifications');
+
+let seq = 0;
+
+exports.create = (doc) => items.insert({ ...doc, seq: ++seq, read: false, deletedAt: null });
+exports.findById = (id) => items.findById(id);
+exports.softDelete = (id) => items.updateById(id, { deletedAt: Date.now() });
+exports.markRead = (id) => items.updateById(id, { read: true });
+exports.findUnread = (userId) => items.find({ userId, read: false, deletedAt: null });
+exports.countUnread = (userId) => items.count({ userId, read: false, deletedAt: null });
+
+// Newest first. `cursor` = seq of the last item the client has seen.
+exports.list = async (userId, { cursor, limit }) => {
+  const filter = { userId, deletedAt: null };
+  if (cursor !== undefined) filter.seq = { $lt: cursor };
+  const rows = await items.find(filter);
+  return rows.sort((a, b) => b.seq - a.seq).slice(0, limit);
+};

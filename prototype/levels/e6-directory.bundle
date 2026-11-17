@@ -1,0 +1,162 @@
+@@@ meta.json
+{
+  "id": "e6",
+  "difficulty": "easy",
+  "title": "Employee directory search",
+  "minutes": 15,
+  "tagline": "Crashes without a query, matches too much, can't sort strings, and dies on a big limit.",
+  "tags": ["optional params", "string matching", "const", "sorting strings"],
+  "lookFor": [
+    "Optional query params are `undefined` when missing. Calling a method on them throws, and you get a 500.",
+    "'starts with' and 'contains' are different rules. Match the spec word for word.",
+    "`a.name - b.name` is NaN for strings. Use `localeCompare`.",
+    "A bug that only fires on one branch (like `limit > 20`) still counts. Reassigning a `const` throws at runtime."
+  ],
+  "bugs": [
+    {
+      "symptom": "No q → 500",
+      "file": "src/app.js",
+      "hints": ["What is `req.query.q` when the URL has no `q`?"],
+      "cause": "`req.query.q.toLowerCase()` throws a TypeError when q is missing.",
+      "fix": "`const q = (req.query.q || '').trim().toLowerCase();`",
+      "pattern": "Optional param not defaulted"
+    },
+    {
+      "symptom": "'an' also matches Karan and Bhavana",
+      "file": "src/app.js",
+      "hints": ["Spec says 'name starts with q'. What does the filter use?"],
+      "cause": "`includes` matches anywhere in the name. The rule is prefix match.",
+      "fix": "`u.name.toLowerCase().startsWith(q)`",
+      "pattern": "Wrong matching rule"
+    },
+    {
+      "symptom": "Results aren't alphabetical",
+      "file": "src/app.js",
+      "hints": ["What is `'Anand' - 'Ankit'`?"],
+      "cause": "Subtracting strings gives NaN, so the comparator is useless and the order stays as stored.",
+      "fix": "`(a, b) => a.name.localeCompare(b.name)`",
+      "pattern": "Numeric comparator on strings"
+    },
+    {
+      "symptom": "limit=50 → 500",
+      "file": "src/app.js",
+      "hints": ["Read the error message in the Output tab. What is being reassigned?"],
+      "cause": "`limit` is declared with `const`, then reassigned when it's over 20, which throws 'Assignment to constant variable'.",
+      "fix": "`const limit = Math.min(parseInt(req.query.limit, 10) || 5, 20);`",
+      "pattern": "const reassignment on a rare branch"
+    },
+    {
+      "symptom": "(hidden) ' an ' with spaces finds nothing",
+      "file": "src/app.js",
+      "hints": ["Is q trimmed?"],
+      "cause": "Untrimmed input never prefix-matches.",
+      "fix": "Trim when you read q.",
+      "pattern": "Input not normalised"
+    }
+  ]
+}
+@@@ ticket.md
+# HR-204: Directory search misbehaves
+
+`GET /users/search?q=&limit=`
+
+* Match: name **starts with** `q`, case-insensitive. `q` is trimmed. Missing/empty `q` → everyone.
+* Sorted by name A→Z.
+* `limit` default **5**, max **20** (bigger values are capped, not errors).
+* Response: array of `{ name, team }`.
+@@@ repo/package.json
+{ "name": "directory", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/app.js
+const express = require('express');
+const people = require('./people');
+
+const app = express();
+
+app.get('/users/search', (req, res) => {
+  const q = req.query.q.toLowerCase();
+  const limit = parseInt(req.query.limit, 10) || 5;
+  if (limit > 20) limit = 20;
+
+  const matches = people
+    .filter((u) => !q || u.name.toLowerCase().includes(q))
+    .sort((a, b) => a.name - b.name)
+    .slice(0, limit);
+
+  res.json(matches);
+});
+
+module.exports = app;
+@@@ repo/src/people.js
+module.exports = [
+  { name: 'Zoya Khan', team: 'Design' },
+  { name: 'Karan Mehta', team: 'Payments' },
+  { name: 'Anitha R', team: 'Search' },
+  { name: 'Bhavana S', team: 'Infra' },
+  { name: 'Ankit Shah', team: 'Payments' },
+  { name: 'Divya N', team: 'Search' },
+  { name: 'Anand Kumar', team: 'Infra' },
+  { name: 'Arjun P', team: 'Mobile' },
+];
+@@@ repo/tests/search.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const names = (res) => res.body.map((u) => u.name);
+
+describe('Directory search', () => {
+  test('prefix match, case-insensitive, sorted', async () => {
+    const res = await request(app).get('/users/search?q=an');
+    expect(names(res)).toEqual(['Anand Kumar', 'Anitha R', 'Ankit Shah']);
+  });
+
+  test('no q returns the first 5 alphabetically', async () => {
+    const res = await request(app).get('/users/search');
+    expect(res.status).toBe(200);
+    expect(names(res)).toEqual(['Anand Kumar', 'Anitha R', 'Ankit Shah', 'Arjun P', 'Bhavana S']);
+  });
+
+  test('limit is capped, not an error', async () => {
+    const res = await request(app).get('/users/search?limit=50');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(8);
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const names = (res) => res.body.map((u) => u.name);
+
+describe('hidden', () => {
+  test('uppercase query', async () => {
+    expect(names(await request(app).get('/users/search?q=AN'))).toEqual(['Anand Kumar', 'Anitha R', 'Ankit Shah']);
+  });
+  test('padded query is trimmed', async () => {
+    expect(names(await request(app).get('/users/search?q=%20an%20'))).toEqual(['Anand Kumar', 'Anitha R', 'Ankit Shah']);
+  });
+  test('no match → []', async () => {
+    expect((await request(app).get('/users/search?q=zz')).body).toEqual([]);
+  });
+  test('limit=2', async () => {
+    expect(names(await request(app).get('/users/search?limit=2'))).toEqual(['Anand Kumar', 'Anitha R']);
+  });
+});
+@@@ solution/src/app.js
+const express = require('express');
+const people = require('./people');
+
+const app = express();
+
+app.get('/users/search', (req, res) => {
+  const q = (req.query.q || '').trim().toLowerCase();
+  const limit = Math.min(parseInt(req.query.limit, 10) || 5, 20);
+
+  const matches = people
+    .filter((u) => !q || u.name.toLowerCase().startsWith(q))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, limit);
+
+  res.json(matches);
+});
+
+module.exports = app;

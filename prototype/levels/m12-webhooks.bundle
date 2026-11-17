@@ -1,0 +1,178 @@
+@@@ meta.json
+{
+  "id": "m12",
+  "difficulty": "medium",
+  "title": "Webhook retries & signatures",
+  "minutes": 30,
+  "tagline": "`^` is not 'power of', the cap uses Math.max, deliveries die one attempt late, and uppercase signatures fail.",
+  "tags": ["XOR vs **", "min/max", "retry limits", "case-insensitive compare"],
+  "lookFor": [
+    "`2 ^ n` is bitwise XOR in JS. Exponent is `2 ** n` or `Math.pow(2, n)`.",
+    "Capping a value is `Math.min(value, cap)`. `Math.max` puts a floor on it instead.",
+    "'Give up after 5 attempts' means the 5th failure flips the status. Check `>` vs `>=`.",
+    "Hex strings are case-insensitive. Normalise before comparing."
+  ],
+  "bugs": [
+    {
+      "symptom": "First retry delay is 2000 ms instead of 1000",
+      "file": "src/retry.js",
+      "hints": ["What is `1000 * 2 ^ 0` in JavaScript? Precedence AND meaning."],
+      "cause": "`^` is XOR and binds looser than `*`: `(1000*2) ^ 0` = 2000.",
+      "fix": "`BASE_MS * 2 ** (attempts - 1)`",
+      "pattern": "^ is XOR"
+    },
+    {
+      "symptom": "Delays are never below the cap",
+      "file": "src/retry.js",
+      "hints": ["Cap = upper bound. Which of min/max gives an upper bound?"],
+      "cause": "`Math.max(delay, MAX_DELAY_MS)` makes every delay at least 5000.",
+      "fix": "`Math.min(delay, MAX_DELAY_MS)`",
+      "pattern": "min/max swapped"
+    },
+    {
+      "symptom": "Delivery is still pending after 5 failures",
+      "file": "src/retry.js",
+      "hints": ["After the 5th failure attempts = 5. Is `5 > 5`?"],
+      "cause": "`attempts > MAX_ATTEMPTS` waits for a 6th failure.",
+      "fix": "`attempts >= MAX_ATTEMPTS`",
+      "pattern": "Off-by-one retry limit"
+    },
+    {
+      "symptom": "(hidden) Uppercase signature rejected",
+      "file": "src/signature.js",
+      "hints": ["What case does `toString(16)` produce?"],
+      "cause": "Strict string compare of hex with different case.",
+      "fix": "`String(signature).toLowerCase() === sign(payload)`",
+      "pattern": "Case-sensitive compare"
+    }
+  ]
+}
+@@@ ticket.md
+# HOOK-5: Webhooks retry storm
+
+| Method | Path | Behaviour |
+|---|---|---|
+| `POST` | `/deliveries` | **201** `{ _id, attempts: 0, status: 'pending' }` |
+| `POST` | `/deliveries/:id/fail` | Record a failed attempt → `{ attempts, status, nextRetryMs }` |
+| `POST` | `/verify { payload, signature }` | `{ valid }`. Hex signature, **case-insensitive** |
+
+* Retry delay after the n-th failure: `1000 × 2^(n−1)` ms, **capped at 5000**.
+* After the **5th** failure: `status: 'dead'`, `nextRetryMs: null`.
+@@@ repo/package.json
+{ "name": "webhooks", "version": "1.0.0", "scripts": { "test": "jest" } }
+@@@ repo/src/retry.js
+const BASE_MS = 1000;
+const MAX_DELAY_MS = 5000;
+const MAX_ATTEMPTS = 5;
+
+function afterFailure(attempts) {
+  if (attempts > MAX_ATTEMPTS) return { status: 'dead', nextRetryMs: null };
+  const delay = BASE_MS * 2 ^ (attempts - 1);
+  return { status: 'pending', nextRetryMs: Math.max(delay, MAX_DELAY_MS) };
+}
+
+module.exports = { afterFailure };
+@@@ repo/src/signature.js
+function sign(payload) {
+  const h = [...String(payload)].reduce((a, c) => (a * 33 + c.charCodeAt(0)) | 0, 5381);
+  return (h >>> 0).toString(16);
+}
+
+function verify(payload, signature) {
+  return signature === sign(payload);
+}
+
+module.exports = { sign, verify };
+@@@ repo/src/app.js
+const express = require('express');
+const db = require('memdb');
+const { afterFailure } = require('./retry');
+const { verify } = require('./signature');
+
+const deliveries = db.collection('deliveries');
+const app = express();
+app.use(express.json());
+
+app.post('/deliveries', async (req, res) => {
+  res.status(201).json(await deliveries.insert({ attempts: 0, status: 'pending' }));
+});
+
+app.post('/deliveries/:id/fail', async (req, res) => {
+  const d = await deliveries.findOneAndUpdate({ _id: req.params.id }, { $inc: { attempts: 1 } });
+  if (!d) return res.status(404).json({ error: 'not found' });
+  const next = afterFailure(d.attempts);
+  await deliveries.updateById(d._id, { status: next.status });
+  res.json({ attempts: d.attempts, ...next });
+});
+
+app.post('/verify', (req, res) => {
+  res.json({ valid: verify(req.body.payload, req.body.signature) });
+});
+
+module.exports = app;
+@@@ repo/tests/webhooks.test.js
+const request = require('supertest');
+const app = require('../src/app');
+
+const fail = (id) => request(app).post(`/deliveries/${id}/fail`);
+
+describe('Webhooks', () => {
+  test('backoff 1s, 2s, 4s, then capped at 5s', async () => {
+    const d = (await request(app).post('/deliveries')).body;
+    const delays = [];
+    for (let i = 0; i < 4; i++) delays.push((await fail(d._id)).body.nextRetryMs);
+    expect(delays).toEqual([1000, 2000, 4000, 5000]);
+  });
+  test('dead after the 5th failure', async () => {
+    const d = (await request(app).post('/deliveries')).body;
+    let last;
+    for (let i = 0; i < 5; i++) last = await fail(d._id);
+    expect(last.body).toEqual({ attempts: 5, status: 'dead', nextRetryMs: null });
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const { sign } = require('../src/signature');
+
+describe('hidden', () => {
+  test('signature is case-insensitive', async () => {
+    const sig = sign('{"order":1}').toUpperCase();
+    expect((await request(app).post('/verify').send({ payload: '{"order":1}', signature: sig })).body.valid).toBe(true);
+  });
+  test('wrong signature is invalid', async () => {
+    expect((await request(app).post('/verify').send({ payload: 'x', signature: 'deadbeef' })).body.valid).toBe(false);
+  });
+  test('4th failure still pending', async () => {
+    const d = (await request(app).post('/deliveries')).body;
+    let last;
+    for (let i = 0; i < 4; i++) last = await request(app).post(`/deliveries/${d._id}/fail`);
+    expect(last.body.status).toBe('pending');
+  });
+  test('unknown delivery → 404', async () => {
+    expect((await request(app).post('/deliveries/nope/fail')).status).toBe(404);
+  });
+});
+@@@ solution/src/retry.js
+const BASE_MS = 1000;
+const MAX_DELAY_MS = 5000;
+const MAX_ATTEMPTS = 5;
+
+function afterFailure(attempts) {
+  if (attempts >= MAX_ATTEMPTS) return { status: 'dead', nextRetryMs: null };
+  const delay = BASE_MS * 2 ** (attempts - 1);
+  return { status: 'pending', nextRetryMs: Math.min(delay, MAX_DELAY_MS) };
+}
+
+module.exports = { afterFailure };
+@@@ solution/src/signature.js
+function sign(payload) {
+  const h = [...String(payload)].reduce((a, c) => (a * 33 + c.charCodeAt(0)) | 0, 5381);
+  return (h >>> 0).toString(16);
+}
+
+function verify(payload, signature) {
+  return String(signature || '').toLowerCase() === sign(payload);
+}
+
+module.exports = { sign, verify };

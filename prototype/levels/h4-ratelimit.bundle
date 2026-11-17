@@ -1,0 +1,230 @@
+@@@ meta.json
+{
+  "id": "h4",
+  "difficulty": "hard",
+  "title": "API rate limiter middleware",
+  "minutes": 40,
+  "tagline": "Sliding-window limiter that never limits, limits everyone together, and tells clients to wait 40,000 seconds.",
+  "tags": ["middleware", "header casing", "sliding window", "units", "state"],
+  "lookFor": [
+    "When middleware 'does nothing', log the state it keeps. Here: the bucket key and the hits array.",
+    "`req.headers` keys are lower-case. `req.headers['X-Api-Key']` is always undefined, so every client shares one bucket.",
+    "Window pruning keeps timestamps NEWER than `now - window`. Say the inequality out loud.",
+    "HTTP Retry-After is in SECONDS, rounded up.",
+    "Should a rejected request use up quota? Usually no, or a client that retries never recovers."
+  ],
+  "bugs": [
+    {
+      "symptom": "The 6th request still gets 200",
+      "file": "src/middleware/rateLimit.js",
+      "hints": [
+        "console.log(hits) right after the filter. What survives?",
+        "We want timestamps from the last 60s, i.e. t > now - windowMs."
+      ],
+      "cause": "`filter((t) => t < now - windowMs)` keeps only EXPIRED timestamps and drops the recent ones, so the bucket never grows past 1.",
+      "fix": "`filter((t) => t > now - windowMs)`",
+      "pattern": "Inverted comparison"
+    },
+    {
+      "symptom": "One client's traffic blocks every other client",
+      "file": "src/middleware/rateLimit.js",
+      "hints": [
+        "Log the bucket key. Is it what you expect?",
+        "How does auth.js read the header? How does rateLimit.js read it?"
+      ],
+      "cause": "`req.headers['X-Api-Key']` is undefined because Node lower-cases header names. All clients share the `undefined` bucket.",
+      "fix": "`const key = req.get('x-api-key');` (or `req.headers['x-api-key']`)",
+      "pattern": "Header case"
+    },
+    {
+      "symptom": "Retry-After is 40000",
+      "file": "src/middleware/rateLimit.js",
+      "hints": [
+        "What unit is the difference between two clock.now() values? What unit does Retry-After use?"
+      ],
+      "cause": "Retry-After is sent in milliseconds, but the header is defined in seconds.",
+      "fix": "`Math.ceil((hits[0] + windowMs - now) / 1000)`",
+      "pattern": "ms vs seconds"
+    },
+    {
+      "symptom": "(hidden) A client that retries while blocked never recovers",
+      "file": "src/middleware/rateLimit.js",
+      "hints": [
+        "Is the timestamp pushed before or after the limit check?"
+      ],
+      "cause": "`hits.push(now)` runs before the check, so rejected requests count too. Retrying while blocked keeps sliding the window forward.",
+      "fix": "Check `if (hits.length >= limit) → 429` first; only `push(now)` for allowed requests.",
+      "pattern": "Counting rejected attempts"
+    }
+  ]
+}
+@@@ ticket.md
+# GW-512: Rate limiter is broken in prod
+
+`GET /api/quote` is limited to **5 requests per client per 60 s** (sliding window). Each client sends `x-api-key`.
+
+Reports: **abusive clients aren't limited at all**, but once someone does get limited, **every customer gets 429s**. And clients are told to wait **hours**.
+
+## Rules
+* Missing `x-api-key` → **401**.
+* Requests from the last **60 s** count. A request exactly 60 s old no longer counts.
+* Over the limit → **429** with `Retry-After` = **seconds** (rounded up) until the oldest counted request expires.
+* Rejected requests do **not** count toward the limit.
+* Limits are **per key**.
+
+Tests control time with `src/lib/clock.js`.
+@@@ repo/package.json
+{
+  "name": "api-gateway",
+  "version": "7.1.0",
+  "scripts": { "test": "jest" },
+  "dependencies": { "express": "^5.0.0" },
+  "devDependencies": { "jest": "^29.0.0", "supertest": "^7.0.0" }
+}
+@@@ repo/src/app.js
+const express = require('express');
+const auth = require('./middleware/auth');
+const rateLimit = require('./middleware/rateLimit');
+
+const app = express();
+app.use(express.json());
+app.use(auth);
+
+app.get('/api/quote', rateLimit({ limit: 5, windowMs: 60 * 1000 }), (req, res) => {
+  res.json({ quote: 'Ship small, ship often.', client: req.get('x-api-key') });
+});
+
+module.exports = app;
+@@@ repo/src/middleware/auth.js
+module.exports = function auth(req, res, next) {
+  if (!req.get('x-api-key')) {
+    return res.status(401).json({ error: 'missing api key' });
+  }
+  next();
+};
+@@@ repo/src/middleware/rateLimit.js
+const clock = require('../lib/clock');
+
+// Sliding-window limiter. In prod this state lives in Redis.
+module.exports = function rateLimit({ limit, windowMs }) {
+  const buckets = new Map(); // key -> [timestamps]
+
+  return function rateLimitMiddleware(req, res, next) {
+    const key = req.headers['X-Api-Key'];
+    const now = clock.now();
+
+    const hits = (buckets.get(key) || []).filter((t) => t < now - windowMs);
+    hits.push(now);
+    buckets.set(key, hits);
+
+    if (hits.length > limit) {
+      const retryAfter = hits[0] + windowMs - now;
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ error: 'rate limit exceeded' });
+    }
+    next();
+  };
+};
+@@@ repo/src/lib/clock.js
+// Frozen clock: only moves when tests advance it.
+let t = Date.UTC(2026, 0, 1, 0, 0, 0);
+
+module.exports = {
+  now: () => t,
+  advance: (ms) => { t += ms; },
+};
+@@@ repo/tests/rateLimit.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const clock = require('../src/lib/clock');
+
+const hit = (key) => request(app).get('/api/quote').set('x-api-key', key);
+const burst = async (key, n) => { const out = []; for (let i = 0; i < n; i++) out.push((await hit(key)).status); return out; };
+
+describe('Rate limiter', () => {
+  test('5 requests pass, the 6th is 429', async () => {
+    expect(await burst('k1', 6)).toEqual([200, 200, 200, 200, 200, 429]);
+  });
+
+  test('limits are per API key', async () => {
+    await burst('k1', 6);
+    const other = await hit('k2');
+    expect(other.status).toBe(200);
+  });
+
+  test('allowed again after the window passes', async () => {
+    await burst('k1', 5);
+    clock.advance(60 * 1000);
+    expect((await hit('k1')).status).toBe(200);
+  });
+
+  test('Retry-After is in seconds', async () => {
+    await burst('k1', 5);
+    clock.advance(20 * 1000);
+    const res = await hit('k1');
+    expect(res.status).toBe(429);
+    expect(res.headers['retry-after']).toBe('40');
+  });
+});
+@@@ hidden.test.js
+const request = require('supertest');
+const app = require('../src/app');
+const clock = require('../src/lib/clock');
+
+const hit = (key) => request(app).get('/api/quote').set('x-api-key', key);
+const burst = async (key, n) => { const out = []; for (let i = 0; i < n; i++) out.push((await hit(key)).status); return out; };
+
+describe('hidden', () => {
+  test('missing key → 401', async () => {
+    const res = await request(app).get('/api/quote');
+    expect(res.status).toBe(401);
+  });
+
+  test('rejected requests do not extend the block', async () => {
+    await burst('k', 5);
+    clock.advance(30 * 1000);
+    expect(await burst('k', 5)).toEqual([429, 429, 429, 429, 429]);
+    clock.advance(31 * 1000);
+    expect((await hit('k')).status).toBe(200);
+  });
+
+  test('Retry-After rounds up', async () => {
+    await burst('k', 5);
+    clock.advance(19500);
+    const res = await hit('k');
+    expect(res.headers['retry-after']).toBe('41');
+  });
+
+  test('sliding window: old hits roll off one by one', async () => {
+    await hit('k');
+    clock.advance(10 * 1000);
+    await burst('k', 4);
+    expect((await hit('k')).status).toBe(429);
+    clock.advance(50 * 1000);
+    expect((await hit('k')).status).toBe(200);
+    expect((await hit('k')).status).toBe(429);
+  });
+});
+@@@ solution/src/middleware/rateLimit.js
+const clock = require('../lib/clock');
+
+// Sliding-window limiter. In prod this state lives in Redis.
+module.exports = function rateLimit({ limit, windowMs }) {
+  const buckets = new Map(); // key -> [timestamps]
+
+  return function rateLimitMiddleware(req, res, next) {
+    const key = req.get('x-api-key');
+    const now = clock.now();
+
+    const hits = (buckets.get(key) || []).filter((t) => t > now - windowMs);
+    buckets.set(key, hits);
+
+    if (hits.length >= limit) {
+      const retryAfter = Math.ceil((hits[0] + windowMs - now) / 1000);
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ error: 'rate limit exceeded' });
+    }
+    hits.push(now);
+    next();
+  };
+};
