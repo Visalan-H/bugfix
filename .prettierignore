@@ -4,3 +4,4 @@ levels
 node_modules
 package-lock.json
 HANDOFF.md
+.claude
