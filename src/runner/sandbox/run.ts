@@ -54,6 +54,10 @@ export function listTests(files: Files, testPath: string): { names: string[]; er
 }
 
 export interface RunHooks {
+  /** Skip the tests before this index. Lets the runner carry on after a test that hung. */
+  startAt?: number;
+  /** Called once with every test name in the file, before any test runs. */
+  onList?: (names: string[]) => void;
   /** Called just before each test starts. */
   onStart?: (name: string, index: number) => void;
   /** Called as soon as each test finishes. */
@@ -70,7 +74,8 @@ export async function runTests(files: Files, testPath: string, hooks: RunHooks =
     hooks.onResult?.(r);
     return results;
   }
-  for (let i = 0; i < names.length; i++) {
+  hooks.onList?.(names);
+  for (let i = hooks.startAt ?? 0; i < names.length; i++) {
     hooks.onStart?.(names[i], i);
     const r = await runOne(files, testPath, i);
     results.push(r);
