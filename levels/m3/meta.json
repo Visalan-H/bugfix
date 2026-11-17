@@ -1,0 +1,73 @@
+{
+  "id": "m3",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Movie DB watch list",
+  "minutes": 30,
+  "tagline": "Based on a real Amazon test: duplicates get in, removed movies come back, and errors keep running.",
+  "tags": [
+    "object identity",
+    "check order",
+    "unsaved writes",
+    "status codes"
+  ],
+  "lookFor": [
+    "`list.includes({ ... })` never finds a match. Two objects are never equal. Compare ids instead.",
+    "Check in order: does the movie exist → is it already there → save. Stop at the first problem.",
+    "`.filter()` makes a NEW list. Keep it and save it.",
+    "A save without `await` can lose the race against the next request.",
+    "Deleting something that isn't there should say 404."
+  ],
+  "bugs": [
+    {
+      "symptom": "Adding the same movie twice is allowed",
+      "file": "src/services/watchlistService.js",
+      "hints": [
+        "What does `[{ movieId: 'm1' }].includes({ movieId: 'm1' })` give?"
+      ],
+      "cause": "`includes({ movieId })` makes a brand-new object. It is never the same object as the saved ones, so the check always says 'not there'.",
+      "fix": "`if (wl.items.some((i) => i.movieId === movieId)) throw new ConflictError(...)`",
+      "pattern": "Comparing objects"
+    },
+    {
+      "symptom": "Second add still succeeds right after the first",
+      "file": "src/services/watchlistService.js",
+      "hints": [
+        "Is the save awaited before the reply goes out?"
+      ],
+      "cause": "`repo.save(wl)` isn't awaited. The next request reads the old list.",
+      "fix": "`await repo.save(wl);`",
+      "pattern": "Missing await on save"
+    },
+    {
+      "symptom": "Unknown movie returns 404 but gets added anyway",
+      "file": "src/controllers/watchlistController.js",
+      "hints": [
+        "The 404 is sent. Does the function stop there?"
+      ],
+      "cause": "No `return`, so the movie is still added and a second reply is attempted.",
+      "fix": "`return res.status(404).json({ error: 'movie not found' });`",
+      "pattern": "Missing return"
+    },
+    {
+      "symptom": "Removed movies come back",
+      "file": "src/services/watchlistService.js",
+      "hints": [
+        "What happens to the result of `wl.items.filter(...)`?"
+      ],
+      "cause": "`filter` returns a new list, but nobody keeps it. The old list is saved again.",
+      "fix": "`wl.items = wl.items.filter((i) => i.movieId !== movieId);`",
+      "pattern": "New list thrown away"
+    },
+    {
+      "symptom": "Hidden test: Removing a movie that isn't in the list returns 204",
+      "file": "src/services/watchlistService.js",
+      "hints": [
+        "How would you know if anything was removed?"
+      ],
+      "cause": "There's no check, so removing a missing movie says success.",
+      "fix": "Compare the list length before and after. If it's the same, return 404.",
+      "pattern": "Nothing removed, still says OK"
+    }
+  ]
+}

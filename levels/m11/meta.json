@@ -1,0 +1,51 @@
+{
+  "id": "m11",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Storage quota",
+  "minutes": 30,
+  "tagline": "Uploads go over the limit, deleting doesn't free space, and replacing a file counts it twice.",
+  "tags": [
+    "quota math",
+    "unsaved counters",
+    "replace semantics"
+  ],
+  "lookFor": [
+    "The limit check must include the NEW file: `used + size > limit`.",
+    "Change the 'used' number in the database, not in a copy.",
+    "Replacing a file: take away the old size, then add the new one.",
+    "Exactly at the limit is OK."
+  ],
+  "bugs": [
+    {
+      "symptom": "Upload that would exceed the quota is accepted",
+      "file": "src/storage.js",
+      "hints": [
+        "Does the check include the size of the file being uploaded?"
+      ],
+      "cause": "It only checks current usage, so any upload fits while you're under the limit.",
+      "fix": "`if (u.usedKb - oldSize + sizeKb > QUOTA_KB) throw ...`",
+      "pattern": "Check ignores the new file"
+    },
+    {
+      "symptom": "Deleting a file doesn't free space",
+      "file": "src/storage.js",
+      "hints": [
+        "Where is `u.usedKb -= file.sizeKb` saved?"
+      ],
+      "cause": "It only changes a copy in memory.",
+      "fix": "`await usage.findOneAndUpdate({ _id: userId }, { $inc: { usedKb: -file.sizeKb } })`",
+      "pattern": "Changed but not saved"
+    },
+    {
+      "symptom": "Hidden test: Re-uploading the same name double-counts",
+      "file": "src/storage.js",
+      "hints": [
+        "If the file already exists, how much should usage change by?"
+      ],
+      "cause": "It adds the full new size without taking away the old one.",
+      "fix": "Change by `sizeKb - (existing ? existing.sizeKb : 0)`.",
+      "pattern": "Replace counted as new"
+    }
+  ]
+}

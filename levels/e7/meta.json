@@ -1,0 +1,62 @@
+{
+  "id": "e7",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "URL shortener",
+  "minutes": 15,
+  "tagline": "Unknown links don't 404, visits are never counted, and codes are too short.",
+  "tags": [
+    "missing await",
+    "unsaved counters",
+    "status codes",
+    "slice"
+  ],
+  "lookFor": [
+    "A Promise inside `if` always counts as true. If a 404 never happens, check for `await`.",
+    "`link.visits++` on a loaded copy doesn't save. Update the database.",
+    "301 means 'moved forever' (browsers remember it). 302 means 'for now'.",
+    "`slice(2, 6)` gives 4 characters. The end number is not included."
+  ],
+  "bugs": [
+    {
+      "symptom": "Unknown code redirects instead of 404",
+      "file": "src/app.js",
+      "hints": [
+        "Log `link` in the redirect handler. Is it a link or a Promise?"
+      ],
+      "cause": "No `await`, so `link` is a Promise. A Promise counts as true, so the 404 never happens.",
+      "fix": "`const link = await repo.findByCode(req.params.code);`",
+      "pattern": "Missing await in an if"
+    },
+    {
+      "symptom": "Redirect is 301",
+      "file": "src/app.js",
+      "hints": [
+        "The rule says 302. Why does that matter for counting visits?"
+      ],
+      "cause": "With 301, browsers remember the target and stop asking our server, so visits can't be counted.",
+      "fix": "`res.redirect(302, link.url)`",
+      "pattern": "Wrong status code"
+    },
+    {
+      "symptom": "Visits stay at 0",
+      "file": "src/app.js",
+      "hints": [
+        "Where does `link.visits++` get saved?"
+      ],
+      "cause": "It only changes the copy in memory. The database never changes.",
+      "fix": "`await repo.incrementVisits(link._id);` (already in the repo)",
+      "pattern": "Changed but not saved"
+    },
+    {
+      "symptom": "Hidden test: Codes are 4 chars, not 6",
+      "file": "src/codes.js",
+      "hints": [
+        "How long is `s.slice(2, 6)`?"
+      ],
+      "cause": "`slice(2, 6)` takes positions 2 to 5, which is only 4 characters.",
+      "fix": "`.slice(2, 8)`",
+      "pattern": "Off by one in slice"
+    }
+  ]
+}

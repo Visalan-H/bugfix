@@ -1,0 +1,62 @@
+{
+  "id": "h5",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "Cinema seat holds",
+  "minutes": 45,
+  "tagline": "Two people get the same seat, failed holds keep seats locked, old holds never expire, and late confirms go through.",
+  "tags": [
+    "concurrency",
+    "atomic updates",
+    "rollback",
+    "expiry"
+  ],
+  "lookFor": [
+    "Taking a seat must be ONE database step that says 'only if free'.",
+    "If seat 3 fails, give back seats 1 and 2.",
+    "A hold that has run out of time counts as free.",
+    "Check the hold is still valid when confirming."
+  ],
+  "bugs": [
+    {
+      "symptom": "Two concurrent holds both get seat A1",
+      "file": "src/seats.js",
+      "hints": [
+        "Both read 'free' before either saves. Is there a one-step update?"
+      ],
+      "cause": "Read, check, then save. Two people slip in between.",
+      "fix": "Per seat: `seats.findOneAndUpdate({ _id, status: 'free' }, { $set: { status: 'held', ... } })`. null = taken.",
+      "pattern": "Two requests clash"
+    },
+    {
+      "symptom": "Failed hold leaves earlier seats held",
+      "file": "src/seats.js",
+      "hints": [
+        "If A2 is taken, what happened to A1?"
+      ],
+      "cause": "Seats are taken one by one, and nothing gives them back on failure.",
+      "fix": "Remember taken seats. On failure, set them back to `free`.",
+      "pattern": "Not undone on failure"
+    },
+    {
+      "symptom": "Expired holds block seats forever",
+      "file": "src/seats.js",
+      "hints": [
+        "When is a 'held' seat actually free?"
+      ],
+      "cause": "Only `free` counts. Expired holds block the seat forever.",
+      "fix": "Also try `{ _id, status: 'held', heldUntil: { $lte: now } }`.",
+      "pattern": "Expiry ignored"
+    },
+    {
+      "symptom": "Hidden test: Confirming an expired hold succeeds",
+      "file": "src/seats.js",
+      "hints": [
+        "Does confirm look at `heldUntil`?"
+      ],
+      "cause": "An old hold can still be confirmed.",
+      "fix": "If the hold has run out of time, return 410.",
+      "pattern": "Expiry not checked at confirm"
+    }
+  ]
+}
