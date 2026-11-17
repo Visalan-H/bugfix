@@ -1,0 +1,50 @@
+{
+  "id": "e8",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Event RSVP",
+  "minutes": 15,
+  "tagline": "Events take one person too many, people can sign up twice, and cancelling removes the wrong person.",
+  "tags": [
+    "capacity",
+    "duplicates",
+    "splice(-1)"
+  ],
+  "lookFor": [
+    "Full means `count === capacity`. Using `>` lets one extra person in.",
+    "Any 'join' action: what if the same person does it twice?",
+    "If `indexOf` finds nothing it returns -1, and `splice(-1, 1)` removes the LAST item."
+  ],
+  "bugs": [
+    {
+      "symptom": "Event takes one more attendee than capacity",
+      "file": "src/rsvpService.js",
+      "hints": [
+        "When the count equals the capacity, is the event full?"
+      ],
+      "cause": "`count > capacity` only says full when it's already over, so one extra person gets in.",
+      "fix": "`if (ev.attendees.length >= ev.capacity)`",
+      "pattern": "Off by one"
+    },
+    {
+      "symptom": "The same user can RSVP twice",
+      "file": "src/rsvpService.js",
+      "hints": [
+        "Is anything checked before the name is added?"
+      ],
+      "cause": "Nothing stops the same person signing up again.",
+      "fix": "`if (ev.attendees.includes(userId)) throw ConflictError('already attending');`",
+      "pattern": "No duplicate check"
+    },
+    {
+      "symptom": "Cancelling without an RSVP removes someone else",
+      "file": "src/rsvpService.js",
+      "hints": [
+        "What does `indexOf` return when the person isn't there? What does splice do with that?"
+      ],
+      "cause": "`indexOf` gives -1, and `splice(-1, 1)` deletes whoever is last in the list.",
+      "fix": "`const i = ev.attendees.indexOf(userId); if (i === -1) throw NotFoundError('not attending'); ev.attendees.splice(i, 1);`",
+      "pattern": "splice(-1) removes the last item"
+    }
+  ]
+}

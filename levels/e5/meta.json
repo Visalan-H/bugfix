@@ -1,0 +1,60 @@
+{
+  "id": "e5",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Shopping cart totals",
+  "minutes": 15,
+  "tagline": "One `=` instead of `===`, a sum with no starting value, and a 10% coupon that takes 100%.",
+  "tags": [
+    "assignment in condition",
+    "reduce",
+    "percentages"
+  ],
+  "lookFor": [
+    "Inside a condition, `=` sets a value. `===` compares. Look for a single `=`.",
+    "`reduce` needs a starting value. For a sum, pass `0`.",
+    "A percent saved as 10 means 10 / 100."
+  ],
+  "bugs": [
+    {
+      "symptom": "Adding a second product overwrites the first",
+      "file": "src/cartService.js",
+      "hints": [
+        "Look very closely at the function passed to `cart.items.find`."
+      ],
+      "cause": "`i.sku = sku` sets the value instead of comparing it. So every add 'finds' the first line and changes it.",
+      "fix": "`cart.items.find((i) => i.sku === sku)`",
+      "pattern": "= instead of ==="
+    },
+    {
+      "symptom": "Subtotal is '[object Object]…' or the cart crashes when empty",
+      "file": "src/cartService.js",
+      "hints": [
+        "With no starting value, what is `sum` on the first step?"
+      ],
+      "cause": "Without a start value, `reduce` begins with the first item (an object), not 0. An empty cart crashes.",
+      "fix": "`cart.items.reduce((sum, i) => sum + i.price * i.qty, 0)`",
+      "pattern": "reduce with no start"
+    },
+    {
+      "symptom": "SAVE10 takes 10× the subtotal off",
+      "file": "src/cartService.js",
+      "hints": [
+        "How is `percent` saved in catalog.js?"
+      ],
+      "cause": "The coupon says `percent: 10`, but the code multiplies by 10 instead of 0.10.",
+      "fix": "`subtotal * coupon.percent / 100`",
+      "pattern": "Percent not divided by 100"
+    },
+    {
+      "symptom": "Hidden test: 'save10' in lowercase is rejected",
+      "file": "src/cartService.js",
+      "hints": [
+        "How are coupon names written in the catalog?"
+      ],
+      "cause": "The lookup needs exact capitals, so 'save10' fails.",
+      "fix": "`const key = String(code).trim().toUpperCase();`",
+      "pattern": "Not cleaned up"
+    }
+  ]
+}

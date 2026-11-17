@@ -1,0 +1,73 @@
+{
+  "id": "m4",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Library loans: dates, limits & state",
+  "minutes": 30,
+  "tagline": "Huge late fees, refunds for early returns, a loan limit that counts old loans, and books returned twice.",
+  "tags": [
+    "date math",
+    "state transitions",
+    "filters",
+    "boundaries"
+  ],
+  "lookFor": [
+    "Time is in milliseconds. One day = 86,400,000 ms, not 86,400.",
+    "Returning early gives a negative number. Use `Math.max(0, ...)`.",
+    "'3 active loans' must only count loans not yet returned.",
+    "Can this action happen twice? What stops it?",
+    "At exactly 0 copies, `< 0` is false. Use `< 1`."
+  ],
+  "bugs": [
+    {
+      "symptom": "Late fee is enormous",
+      "file": "src/services/loanService.js",
+      "hints": [
+        "`clock.now()` is in ms. What does the code divide by?"
+      ],
+      "cause": "Dividing ms by 86,400 treats them as seconds, so 2 days late becomes 2,000 days.",
+      "fix": "`Math.ceil((returnedAt - dueAt) / DAY_MS)`",
+      "pattern": "Seconds vs milliseconds"
+    },
+    {
+      "symptom": "Returning on time gives a negative fee",
+      "file": "src/services/loanService.js",
+      "hints": [
+        "What is `returnedAt - dueAt` when the book comes back early?"
+      ],
+      "cause": "Early returns give a negative number, so the fee becomes negative.",
+      "fix": "`Math.max(0, Math.ceil((returnedAt - dueAt) / DAY_MS))`",
+      "pattern": "Negative not stopped"
+    },
+    {
+      "symptom": "Can't borrow again after returning a book (limit hit)",
+      "file": "src/repositories/loanRepo.js",
+      "hints": [
+        "What does `countActive` actually count?"
+      ],
+      "cause": "It counts every loan ever, even returned ones.",
+      "fix": "`loans.count({ memberId, returnedAt: null })`",
+      "pattern": "Counting old loans too"
+    },
+    {
+      "symptom": "Returning the same loan twice increases stock",
+      "file": "src/services/loanService.js",
+      "hints": [
+        "What stops a returned loan from being returned again?"
+      ],
+      "cause": "Nothing. A second return adds the copy back again.",
+      "fix": "`if (loan.returnedAt !== null) throw new ConflictError('already returned');`",
+      "pattern": "Can be done twice"
+    },
+    {
+      "symptom": "Hidden test: You can borrow a book with 0 copies left",
+      "file": "src/services/loanService.js",
+      "hints": [
+        "With 0 copies left, does `available < 0` stop the loan?"
+      ],
+      "cause": "`0 < 0` is false, so the loan goes through and stock goes to -1.",
+      "fix": "`if (book.available < 1) throw new ConflictError('no copies available');`",
+      "pattern": "Off by one at zero"
+    }
+  ]
+}

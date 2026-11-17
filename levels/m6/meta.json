@@ -1,0 +1,61 @@
+{
+  "id": "m6",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Clinic appointment booking",
+  "minutes": 30,
+  "tagline": "Back-to-back slots clash, one doctor blocks another, and cancelled slots stay taken.",
+  "tags": [
+    "interval overlap",
+    "scoped queries",
+    "status filters"
+  ],
+  "lookFor": [
+    "Two times overlap only if `a.start < b.end && b.start < a.end`. Use `<`, so touching doesn't count.",
+    "Only check against the SAME doctor.",
+    "Leave cancelled bookings out of the check.",
+    "Check that start is before end."
+  ],
+  "bugs": [
+    {
+      "symptom": "10:30–11:00 clashes with 10:00–10:30",
+      "file": "src/booking.js",
+      "hints": [
+        "Try start=630,end=660 against an existing 600–630."
+      ],
+      "cause": "`<=` treats 10:00–10:30 and 10:30–11:00 as clashing.",
+      "fix": "`a.start < b.end && b.start < a.end`",
+      "pattern": "Touching counted as overlap"
+    },
+    {
+      "symptom": "Dr. Rao can't take a slot Dr. Iyer has booked",
+      "file": "src/booking.js",
+      "hints": [
+        "Which bookings does the clash check load?"
+      ],
+      "cause": "It loads all bookings, not just this doctor's.",
+      "fix": "`appts.find({ doctorId, status: 'booked' })`",
+      "pattern": "Checks every doctor"
+    },
+    {
+      "symptom": "A cancelled slot still can't be rebooked",
+      "file": "src/booking.js",
+      "hints": [
+        "Does the check look at status?"
+      ],
+      "cause": "Cancelled bookings are still treated as taken.",
+      "fix": "Only load bookings with `status: 'booked'`.",
+      "pattern": "Cancelled still counted"
+    },
+    {
+      "symptom": "Hidden test: end before start is accepted",
+      "file": "src/booking.js",
+      "hints": [
+        "Is start < end checked?"
+      ],
+      "cause": "End before start is accepted.",
+      "fix": "`if (!(Number.isInteger(start) && Number.isInteger(end) && start < end)) throw new HttpError(400, ...)`",
+      "pattern": "Missing check"
+    }
+  ]
+}

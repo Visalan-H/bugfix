@@ -1,0 +1,72 @@
+{
+  "id": "e6",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Employee directory search",
+  "minutes": 15,
+  "tagline": "Search crashes without a query, matches too much, can't sort names, and breaks on a big limit.",
+  "tags": [
+    "optional params",
+    "string matching",
+    "const",
+    "sorting strings"
+  ],
+  "lookFor": [
+    "A missing URL value is `undefined`. Calling `.toLowerCase()` on it crashes.",
+    "'Starts with' is not 'contains'. Match the rule exactly.",
+    "You can't subtract names. Use `localeCompare` to sort text.",
+    "A `const` can't be changed later. Doing so crashes, but only when that line runs."
+  ],
+  "bugs": [
+    {
+      "symptom": "No q → 500",
+      "file": "src/app.js",
+      "hints": [
+        "What is `req.query.q` when the URL has no `q`?"
+      ],
+      "cause": "`req.query.q.toLowerCase()` crashes when there is no `q`.",
+      "fix": "`const q = (req.query.q || '').trim().toLowerCase();`",
+      "pattern": "Missing value not handled"
+    },
+    {
+      "symptom": "'an' also matches Karan and Bhavana",
+      "file": "src/app.js",
+      "hints": [
+        "The rule says 'name starts with'. What does the code use?"
+      ],
+      "cause": "`includes` matches anywhere in the name, so 'an' also finds 'Karan'.",
+      "fix": "`u.name.toLowerCase().startsWith(q)`",
+      "pattern": "Wrong match rule"
+    },
+    {
+      "symptom": "Results aren't alphabetical",
+      "file": "src/app.js",
+      "hints": [
+        "What is `'Anand' - 'Ankit'`?"
+      ],
+      "cause": "Subtracting two names gives NaN (not a number), so nothing gets sorted.",
+      "fix": "`(a, b) => a.name.localeCompare(b.name)`",
+      "pattern": "Subtracting text"
+    },
+    {
+      "symptom": "limit=50 → 500",
+      "file": "src/app.js",
+      "hints": [
+        "Read the error in the Output tab. What is being changed?"
+      ],
+      "cause": "`limit` is a `const`, and the code tries to change it when it's over 20. That crashes.",
+      "fix": "`const limit = Math.min(parseInt(req.query.limit, 10) || 5, 20);`",
+      "pattern": "Changing a const"
+    },
+    {
+      "symptom": "Hidden test: ' an ' with spaces finds nothing",
+      "file": "src/app.js",
+      "hints": [
+        "Are spaces removed from q?"
+      ],
+      "cause": "' an ' with spaces never matches the start of a name.",
+      "fix": "Trim q when you read it.",
+      "pattern": "Not cleaned up"
+    }
+  ]
+}

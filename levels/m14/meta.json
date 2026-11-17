@@ -1,0 +1,62 @@
+{
+  "id": "m14",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Polls & voting",
+  "minutes": 25,
+  "tagline": "A typo in a field name allows unlimited votes, percentages round down, closed polls stay open, and you can vote for anything.",
+  "tags": [
+    "field-name typos",
+    "rounding",
+    "date strings",
+    "whitelists"
+  ],
+  "lookFor": [
+    "A typo in a filter (`userID` vs `userId`) silently matches nothing.",
+    "'Nearest' means `Math.round`. `Math.floor` always rounds down.",
+    "Comparing date TEXT with a number never works. Use `Date.parse` first.",
+    "Check the chosen option is one of the allowed options."
+  ],
+  "bugs": [
+    {
+      "symptom": "Same user can vote many times",
+      "file": "src/polls.js",
+      "hints": [
+        "Compare the field name in `findOne` with the one in `insert`."
+      ],
+      "cause": "It searches for `userID` but saves `userId`, so it never finds the earlier vote.",
+      "fix": "`votes.findOne({ pollId, userId })`",
+      "pattern": "Typo in field name"
+    },
+    {
+      "symptom": "2-vs-1 shows 66% / 33%",
+      "file": "src/polls.js",
+      "hints": [
+        "The rule says nearest whole number."
+      ],
+      "cause": "`Math.floor` always rounds down: 66.7 becomes 66.",
+      "fix": "`Math.round(count * 100 / total)`",
+      "pattern": "Rounds down"
+    },
+    {
+      "symptom": "Votes accepted after the poll closed",
+      "file": "src/polls.js",
+      "hints": [
+        "What type is `closesAt`?"
+      ],
+      "cause": "`closesAt` is text. Comparing text with a number is always false, so the poll never closes.",
+      "fix": "`if (clock.now() >= Date.parse(poll.closesAt))`",
+      "pattern": "Date text vs number"
+    },
+    {
+      "symptom": "Hidden test: Voting for 'pizza' on a yes/no poll works",
+      "file": "src/polls.js",
+      "hints": [
+        "Is `option` checked against `poll.options`?"
+      ],
+      "cause": "Any text counts as a vote.",
+      "fix": "`if (!poll.options.includes(option)) throw new HttpError(400, ...)`",
+      "pattern": "Any option accepted"
+    }
+  ]
+}

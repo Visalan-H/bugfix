@@ -1,0 +1,64 @@
+{
+  "id": "h2",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "Checkout: overselling, money & retries",
+  "minutes": 45,
+  "tagline": "Overselling the last item, half-finished orders, rounding errors, and retries that charge twice.",
+  "tags": [
+    "race conditions",
+    "atomic updates",
+    "rollback",
+    "money",
+    "idempotency"
+  ],
+  "lookFor": [
+    "Read → check → save in separate steps can clash with other requests. Do it in ONE step (the repo has a helper).",
+    "If an order fails halfway, undo what was already changed. Better: check everything first.",
+    "Money: `Math.round(x * 100) / 100`. Watch the brackets.",
+    "Header names are lowercase in `req.headers`. Use `req.get()` everywhere."
+  ],
+  "bugs": [
+    {
+      "symptom": "Total is 70 instead of 69.97",
+      "file": "src/services/orderService.js",
+      "hints": [
+        "What is `total * 100 / 100`?"
+      ],
+      "cause": "`Math.round(total * 100 / 100)` is just `Math.round(total)`, which rounds to whole rupees.",
+      "fix": "`Math.round(total * 100) / 100`",
+      "pattern": "Wrong brackets in rounding"
+    },
+    {
+      "symptom": "A failed order still reduces stock",
+      "file": "src/services/orderService.js",
+      "hints": [
+        "Order [Echo x1, Cable x5]: what happens to the Echo before the Cable fails?"
+      ],
+      "cause": "Stock is reduced inside the checking loop. When item 2 fails, item 1 is already reduced.",
+      "fix": "Check all items first. Then reduce stock, and put it back if anything fails.",
+      "pattern": "Half-finished order"
+    },
+    {
+      "symptom": "Two buyers both get the last Kindle",
+      "file": "src/services/orderService.js",
+      "hints": [
+        "Both requests read stock = 1 before either saves.",
+        "Look at `decrementIfAvailable` in productRepo."
+      ],
+      "cause": "Two buyers both see 1 left, both pass the check, and both buy.",
+      "fix": "Use `productRepo.decrementIfAvailable` (one step). If it returns null, the item is sold out.",
+      "pattern": "Two requests clash"
+    },
+    {
+      "symptom": "Retrying with the same Idempotency-Key charges twice",
+      "file": "src/controllers/orderController.js",
+      "hints": [
+        "Log the key that's saved and the key that's looked up."
+      ],
+      "cause": "It reads with `req.get()` but saves with `req.headers['Idempotency-Key']`, which is undefined.",
+      "fix": "Use `const key = req.get('Idempotency-Key')` for both, and only when it exists.",
+      "pattern": "Header name capitals"
+    }
+  ]
+}

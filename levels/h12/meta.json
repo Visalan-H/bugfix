@@ -1,0 +1,62 @@
+{
+  "id": "h12",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "Daily analytics rollup",
+  "minutes": 40,
+  "tagline": "Date keys sort wrong, empty days disappear, the last day is cut off, and the overall average is wrong.",
+  "tags": [
+    "date keys",
+    "gap filling",
+    "inclusive ranges",
+    "weighted averages"
+  ],
+  "lookFor": [
+    "Dates must be 'YYYY-MM-DD' with leading zeros. `toISOString().slice(0, 10)` does this.",
+    "Charts need every day, even empty ones. Make the list of days first.",
+    "'From/to' dates usually include both ends.",
+    "Overall average = total time / total sessions, not the average of daily averages."
+  ],
+  "bugs": [
+    {
+      "symptom": "Day 10 sorts before day 9 (and keys look like 2026-3-9)",
+      "file": "src/rollup.js",
+      "hints": [
+        "How is `dayKey` built? Does 9 become 09?"
+      ],
+      "cause": "'2026-3-10' comes before '2026-3-9' as text, and it doesn't match the required format.",
+      "fix": "`const dayKey = (ts) => new Date(ts).toISOString().slice(0, 10);`",
+      "pattern": "No leading zeros"
+    },
+    {
+      "symptom": "Days with no events are missing",
+      "file": "src/rollup.js",
+      "hints": [
+        "Where do the days come from: the data or the date range?"
+      ],
+      "cause": "Only days with data are listed.",
+      "fix": "Loop day by day from `from` to `to`, and use 0 for empty days.",
+      "pattern": "Empty days missing"
+    },
+    {
+      "symptom": "The `to` day is cut off",
+      "file": "src/rollup.js",
+      "hints": [
+        "Are sessions on the `to` day included?"
+      ],
+      "cause": "`ts < Date.parse(to)` stops at the START of the last day.",
+      "fix": "`ts < Date.parse(to) + DAY_MS`",
+      "pattern": "Last day cut off"
+    },
+    {
+      "symptom": "Hidden test: Overall average is wrong",
+      "file": "src/rollup.js",
+      "hints": [
+        "Day A: 1 session of 100s. Day B: 3 sessions of 10s. What's the real average?"
+      ],
+      "cause": "A day with 1 session counts as much as a day with 100.",
+      "fix": "`totalSeconds / totalSessions`",
+      "pattern": "Average of averages"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "id": "e1",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Todo API: the classic three",
+  "minutes": 15,
+  "tagline": "Three classic mistakes: a missing await, a missing return, and a text value treated like true/false.",
+  "tags": [
+    "async/await",
+    "response flow",
+    "query params"
+  ],
+  "lookFor": [
+    "Database calls take time. Each one needs `await` in front.",
+    "Sending a response does not stop the function. Put `return` in front of it.",
+    "Values from the URL (like `?done=true`) are always text, never true/false or numbers."
+  ],
+  "bugs": [
+    {
+      "symptom": "POST /todos returns an empty object",
+      "file": "src/routes/todos.js",
+      "hints": [
+        "The test gets back `{}`. What do you get when you send a Promise as JSON?",
+        "Look at the `repo.create(...)` line. Is something missing in front of it?"
+      ],
+      "cause": "`repo.create()` takes time, but nobody waits for it. So `todo` is an unfinished Promise, and a Promise turns into `{}` when sent as JSON.",
+      "fix": "`const todo = await repo.create({ title: title.trim() });`",
+      "pattern": "Missing await"
+    },
+    {
+      "symptom": "A todo with no title crashes after the 400 is sent",
+      "file": "src/routes/todos.js",
+      "hints": [
+        "The 400 is sent. So why does the test still fail after that?",
+        "Does the code stop after `res.status(400).json(...)`?"
+      ],
+      "cause": "`res.json()` sends the reply, but the function keeps running. It then crashes on `title.trim()`, or tries to send a second reply.",
+      "fix": "`return res.status(400).json({ error: 'title is required' });`",
+      "pattern": "Missing return"
+    },
+    {
+      "symptom": "?done=true returns nothing",
+      "file": "src/routes/todos.js",
+      "hints": [
+        "Add `console.log(typeof req.query.done)` in the GET handler.",
+        "Saved value: `true` (true/false). Filter value: `'true'` (text). Are they equal?"
+      ],
+      "cause": "`req.query.done` is the text `'true'`. The saved value is the real `true`. They never match.",
+      "fix": "`filter.done = req.query.done === 'true';`",
+      "pattern": "URL values are text"
+    }
+  ]
+}

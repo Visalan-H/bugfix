@@ -1,0 +1,62 @@
+{
+  "id": "h8",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "Product filters & paging",
+  "minutes": 40,
+  "tagline": "The max price wipes out the min price, the total counts only one page, brand needs exact capitals, and page 0 shows the last page.",
+  "tags": [
+    "query building",
+    "totals",
+    "case-insensitive match",
+    "negative slice"
+  ],
+  "lookFor": [
+    "Setting `filter.price = ...` twice replaces the first one. Combine them.",
+    "Count the total BEFORE cutting it into pages.",
+    "Exact match that ignores capitals: anchored pattern with the `i` flag.",
+    "`slice(-3)` counts from the END. Check page ≥ 1 first."
+  ],
+  "bugs": [
+    {
+      "symptom": "minPrice ignored when maxPrice is also given",
+      "file": "src/search.js",
+      "hints": [
+        "Log the filter for `?minPrice=100&maxPrice=500`."
+      ],
+      "cause": "The second line replaces the first, so the minimum is lost.",
+      "fix": "Build both into one object: `{ $gte: min, $lte: max }`.",
+      "pattern": "Filter overwritten"
+    },
+    {
+      "symptom": "total is the page size",
+      "file": "src/search.js",
+      "hints": [
+        "Which list's length becomes total?"
+      ],
+      "cause": "It counts the page, not all matches.",
+      "fix": "`const total = all.length;` before slicing.",
+      "pattern": "Counted after paging"
+    },
+    {
+      "symptom": "brand=apple finds nothing",
+      "file": "src/search.js",
+      "hints": [
+        "Saved as 'Apple'. Does 'apple' match?"
+      ],
+      "cause": "Plain equality cares about capitals.",
+      "fix": "Use an anchored pattern with `$options: 'i'`. See the reference fix.",
+      "pattern": "Capitals must match"
+    },
+    {
+      "symptom": "Hidden test: page=0 returns the last items",
+      "file": "src/search.js",
+      "hints": [
+        "skip = (0 − 1) × 3 = ? What does slice do with a negative start?"
+      ],
+      "cause": "A negative start counts from the end.",
+      "fix": "`if (!Number.isInteger(page) || page < 1)` → 400",
+      "pattern": "Negative slice"
+    }
+  ]
+}

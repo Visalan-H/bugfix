@@ -1,0 +1,62 @@
+{
+  "id": "h6",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "Wallet ledger & refunds",
+  "minutes": 40,
+  "tagline": "Payments ADD to the balance, retries add money twice, refunds can be bigger than the payment, and you can spend money you don't have.",
+  "tags": [
+    "ledgers",
+    "idempotency scope",
+    "refund limits",
+    "balance checks"
+  ],
+  "lookFor": [
+    "Balance = money in − money out. Check the sign for each type.",
+    "Something created INSIDE a function starts fresh on every call.",
+    "All refunds together must not be more than the payment.",
+    "Don't let the balance go below 0."
+  ],
+  "bugs": [
+    {
+      "symptom": "Balance goes UP after a payment",
+      "file": "src/wallet.js",
+      "hints": [
+        "Does the sum in `balance()` look at `type`?"
+      ],
+      "cause": "Payments are added instead of taken away.",
+      "fix": "`s + (e.type === 'debit' ? -e.amount : e.amount)`",
+      "pattern": "Wrong sign"
+    },
+    {
+      "symptom": "Retried top-up with the same key credits twice",
+      "file": "src/wallet.js",
+      "hints": [
+        "Where is `seen` created? How long does it last?"
+      ],
+      "cause": "The `seen` map is created inside the function, so it's empty every time.",
+      "fix": "Save the key on the ledger entry and look it up there.",
+      "pattern": "Memory wiped every call"
+    },
+    {
+      "symptom": "Refunds can exceed the payment",
+      "file": "src/wallet.js",
+      "hints": [
+        "Does refund look at earlier refunds?"
+      ],
+      "cause": "Nothing compares refunds with the payment.",
+      "fix": "Add up earlier refunds. If earlier + new > payment, return 400.",
+      "pattern": "Refund total not checked"
+    },
+    {
+      "symptom": "Hidden test: Paying more than the balance works",
+      "file": "src/wallet.js",
+      "hints": [
+        "Is the balance checked before paying?"
+      ],
+      "cause": "You can pay more than you have.",
+      "fix": "`if ((await balance(walletId)) < amount) throw new HttpError(409, 'insufficient funds')`",
+      "pattern": "No balance check"
+    }
+  ]
+}

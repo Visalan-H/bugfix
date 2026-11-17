@@ -1,0 +1,62 @@
+{
+  "id": "m13",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Response cache layer",
+  "minutes": 30,
+  "tagline": "Page 2 shows page 1, the cache never helps, prices grow 18% on every request, and new products never show.",
+  "tags": [
+    "cache keys",
+    "TTL units",
+    "shared mutable state",
+    "invalidation"
+  ],
+  "lookFor": [
+    "The cache key must include everything that changes the answer, like the page number.",
+    "Time limits: `clock.now()` is in ms. 30 is not 30 seconds.",
+    "Never change an object you got from the cache. Everyone shares it.",
+    "Adding data must clear the cache."
+  ],
+  "bugs": [
+    {
+      "symptom": "?page=2 returns page 1",
+      "file": "src/cache.js",
+      "hints": [
+        "What is the cache key? Is it different for page=1 and page=2?"
+      ],
+      "cause": "The key is just the path, so every page shares one saved answer.",
+      "fix": "Use `req.url` (it includes `?page=`).",
+      "pattern": "Cache key missing the page"
+    },
+    {
+      "symptom": "Cache never hits",
+      "file": "src/cache.js",
+      "hints": [
+        "`expires = now + 30`: 30 of what?"
+      ],
+      "cause": "30 is added to a time in ms, so the cache entry expires after 30 ms.",
+      "fix": "`expires: clock.now() + TTL_SECONDS * 1000`",
+      "pattern": "Seconds vs milliseconds"
+    },
+    {
+      "symptom": "Price grows by 18% on every cached request",
+      "file": "src/app.js",
+      "hints": [
+        "The handler adds tax. Does it change the cached object itself?"
+      ],
+      "cause": "It changes the cached prices directly, so every hit adds tax again.",
+      "fix": "Make new objects: `items.map((i) => ({ ...i, priceWithGst: ... }))`",
+      "pattern": "Changing cached data"
+    },
+    {
+      "symptom": "Hidden test: New product never shows up",
+      "file": "src/app.js",
+      "hints": [
+        "Does POST /products clear the cache?"
+      ],
+      "cause": "New products are saved, but the old cached list keeps being served.",
+      "fix": "Call `cache.clear()` after adding a product.",
+      "pattern": "Cache not cleared"
+    }
+  ]
+}

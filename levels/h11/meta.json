@@ -1,0 +1,62 @@
+{
+  "id": "h11",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "Referral rewards",
+  "minutes": 40,
+  "tagline": "Signups at the same time go past the reward limit, lowercase codes fail, failed signups still pay rewards, and a bad code blocks signup.",
+  "tags": [
+    "concurrency caps",
+    "ordering side effects",
+    "normalisation",
+    "graceful degradation"
+  ],
+  "lookFor": [
+    "Limits with many requests at once: use ONE step with `{ rewards: { $lt: 3 } }` + `$inc`.",
+    "Give rewards only AFTER the signup works.",
+    "Codes: trim and make uppercase.",
+    "An optional extra (a code) shouldn't block the main action (signup)."
+  ],
+  "bugs": [
+    {
+      "symptom": "Referrer gets more than 3 rewards with concurrent signups",
+      "file": "src/referrals.js",
+      "hints": [
+        "The check and the increase are separate steps."
+      ],
+      "cause": "Four signups all read 2 rewards, all pass, and all add one.",
+      "fix": "`referrers.findOneAndUpdate({ _id: code, rewards: { $lt: CAP } }, { $inc: { rewards: 1, balance: 100 } })`",
+      "pattern": "Requests clash on a limit"
+    },
+    {
+      "symptom": "Reward paid even when signup fails (duplicate email)",
+      "file": "src/referrals.js",
+      "hints": [
+        "Which comes first: the duplicate email check or the reward?"
+      ],
+      "cause": "The reward is paid before the signup is checked.",
+      "fix": "Check and create the user first, then pay the reward.",
+      "pattern": "Reward too early"
+    },
+    {
+      "symptom": "Code 'ravi100' doesn't work",
+      "file": "src/referrals.js",
+      "hints": [
+        "How are codes saved?"
+      ],
+      "cause": "Codes are saved in capitals, so 'ravi100' isn't found.",
+      "fix": "`String(raw).trim().toUpperCase()`",
+      "pattern": "Not cleaned up"
+    },
+    {
+      "symptom": "Hidden test: Invalid code blocks signup",
+      "file": "src/referrals.js",
+      "hints": [
+        "The rule says an unknown code is ignored."
+      ],
+      "cause": "A bad code stops the signup.",
+      "fix": "Treat an unknown code as 'no code' and still create the user.",
+      "pattern": "Optional value blocks signup"
+    }
+  ]
+}
