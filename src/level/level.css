@@ -1,0 +1,55 @@
+/* Level page additions on top of the prototype styles (src/styles.css). */
+
+.lv-loading {
+  padding: 40px 22px;
+  color: var(--fg2);
+  font-size: 14px;
+}
+
+/* Monaco fills the space below the file bar. */
+.monaco-host {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+.monaco-host > section {
+  position: absolute;
+  inset: 0;
+}
+
+/* A line that a console or results link jumped to. */
+.line-flash {
+  background: rgba(255, 191, 71, 0.2);
+  animation: line-flash 1.6s ease-out forwards;
+}
+.line-flash-margin {
+  border-left: 3px solid var(--acc);
+  animation: line-flash 1.6s ease-out forwards;
+}
+@keyframes line-flash {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Keep the file path whole; the shortcut hint shrinks instead. */
+.filebar .fpath {
+  flex: none;
+}
+.filebar .kb {
+  min-width: 0;
+}
+
+.con-src {
+  cursor: pointer;
+}
+
+/* The side panel fills its column. */
+.lv-body > .panel {
+  min-height: 0;
+}
