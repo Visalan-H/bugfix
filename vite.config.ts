@@ -7,4 +7,6 @@ export default defineConfig({
   base: './',
   plugins: [react(), levelsPlugin()],
   worker: { format: 'es' },
+  // Monaco's editor and TypeScript worker are large but only load when a level opens.
+  build: { chunkSizeWarningLimit: 8000 },
 });
