@@ -81,7 +81,19 @@ export function flush() {
   }
 }
 
-if (typeof window !== 'undefined') window.addEventListener('beforeunload', flush);
+if (typeof window !== 'undefined') {
+  // Save only if a change is still waiting. Saving unchanged state would
+  // overwrite progress made in another tab.
+  window.addEventListener('beforeunload', () => {
+    if (saveTimer !== undefined) flush();
+  });
+  // Another tab saved: load its progress, unless this tab has its own unsaved change.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== STORAGE_KEY || saveTimer !== undefined) return;
+    state = read();
+    listeners.forEach((l) => l());
+  });
+}
 
 export const getState = () => state;
 
