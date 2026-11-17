@@ -13,15 +13,20 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** Reads one level folder from disk. */
+export function readLevel(root: string): Level {
+  const entries: Record<string, string> = {};
+  for (const f of walk(root)) entries[relative(root, f).split('\\').join('/')] = readFileSync(f, 'utf8');
+  return buildLevel(entries);
+}
+
 /** Reads every `levels/<id>/` folder from disk. */
 export function readLevels(dir = LEVELS_DIR): { folder: string; level: Level }[] {
   const out: { folder: string; level: Level }[] = [];
   for (const folder of readdirSync(dir)) {
     const root = join(dir, folder);
     if (!statSync(root).isDirectory()) continue;
-    const entries: Record<string, string> = {};
-    for (const f of walk(root)) entries[relative(root, f).split('\\').join('/')] = readFileSync(f, 'utf8');
-    out.push({ folder, level: buildLevel(entries) });
+    out.push({ folder, level: readLevel(root) });
   }
   return out.sort((a, b) => compareLevels(a.level, b.level));
 }
