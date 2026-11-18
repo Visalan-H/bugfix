@@ -1,0 +1,63 @@
+{
+  "id": "m8",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Product reviews & ratings",
+  "minutes": 30,
+  "tagline": "One person can review five times, deleted reviews still count, and the average comes back as text.",
+  "tags": [
+    "uniqueness",
+    "aggregates",
+    "toFixed",
+    "soft delete"
+  ],
+  "lookFor": [
+    "For an average, use the SAME list for the sum and the count.",
+    "`toFixed` returns TEXT. Use `Math.round(x * 10) / 10` for a number.",
+    "No reviews? Return 0, not 0/0 (NaN).",
+    "'One review per person' needs an explicit check."
+  ],
+  "bugs": [
+    {
+      "symptom": "Same user can review a product twice",
+      "file": "src/reviews.js",
+      "hints": [
+        "Does anything look for an earlier review by this user?"
+      ],
+      "cause": "Nothing stops a second review.",
+      "fix": "`if (await reviews.findOne({ productId, userId, deleted: false })) throw new HttpError(409, ...)`",
+      "pattern": "No duplicate check"
+    },
+    {
+      "symptom": "Average is wrong after a delete",
+      "file": "src/reviews.js",
+      "hints": [
+        "Which list is added up? Which list is counted?"
+      ],
+      "cause": "The sum skips deleted reviews, but the count includes them, so the average drops.",
+      "fix": "Filter once, then use that list for both the sum and the count.",
+      "pattern": "Sum and count use different lists"
+    },
+    {
+      "symptom": "avgRating is '4.3' (a string)",
+      "file": "src/reviews.js",
+      "hints": [
+        "What does `toFixed` return?"
+      ],
+      "cause": "`toFixed(1)` gives text like '4.3', not a number.",
+      "fix": "`Math.round(avg * 10) / 10`",
+      "pattern": "toFixed gives text"
+    },
+    {
+      "symptom": "Hidden test: 3.5 stars accepted; no reviews → 'NaN'",
+      "file": "src/reviews.js",
+      "hints": [
+        "Must rating be a whole number?",
+        "What is 0/0?"
+      ],
+      "cause": "3.5 is allowed, and no reviews gives 'NaN'.",
+      "fix": "Use `Number.isInteger(rating)`, and return 0 when there are no reviews.",
+      "pattern": "Missing checks"
+    }
+  ]
+}

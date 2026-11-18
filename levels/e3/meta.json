@@ -1,0 +1,63 @@
+{
+  "id": "e3",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Password reset flow",
+  "minutes": 20,
+  "tagline": "Reset links expire too fast, work twice, and miss emails typed in capitals.",
+  "tags": [
+    "time units",
+    "normalisation",
+    "persistence",
+    "boundaries"
+  ],
+  "lookFor": [
+    "Time: `Date.now()` is in milliseconds. 15 minutes = `15 * 60 * 1000`.",
+    "Emails: trim spaces and make them lowercase before you look them up.",
+    "Changing a value you loaded does not save it. You must write it back to the database.",
+    "'At least 8' means 8 is allowed."
+  ],
+  "bugs": [
+    {
+      "symptom": "Reset email not sent when the email's case differs",
+      "file": "src/repositories/userRepo.js",
+      "hints": [
+        "Saved emails are lowercase. What is searched when someone types 'Asha@Example.com'?",
+        "Where does every email lookup go through?"
+      ],
+      "cause": "The lookup uses the email exactly as typed. 'Asha@Example.com' is not 'asha@example.com', so no user is found.",
+      "fix": "In `findByEmail`: `users.findOne({ email: String(email).trim().toLowerCase() })`",
+      "pattern": "Not cleaned up"
+    },
+    {
+      "symptom": "Token expires almost instantly",
+      "file": "src/services/resetService.js",
+      "hints": [
+        "What unit does `clock.now()` use? What unit is `TTL_MINUTES * 60`?"
+      ],
+      "cause": "`now + 15 * 60` adds 900 milliseconds, not 15 minutes. The link dies in under a second.",
+      "fix": "`expiresAt: clock.now() + TTL_MINUTES * 60 * 1000`",
+      "pattern": "Seconds vs milliseconds"
+    },
+    {
+      "symptom": "A reset token works twice",
+      "file": "src/services/resetService.js",
+      "hints": [
+        "Look at the last line of `resetPassword`. Does `record.used = true` reach the database?"
+      ],
+      "cause": "`record.used = true` only changes the copy in memory. Nothing is saved, so the link keeps working.",
+      "fix": "`await resets.markUsed(record._id);` (this helper already exists)",
+      "pattern": "Changed but not saved"
+    },
+    {
+      "symptom": "Hidden test: An exactly-8-character password is rejected",
+      "file": "src/services/resetService.js",
+      "hints": [
+        "Rule: at least 8. Code: rejects when length <= 8. What happens at exactly 8?"
+      ],
+      "cause": "`<= 8` rejects 8. The rule says 8 is fine.",
+      "fix": "`if (!newPassword || newPassword.length < MIN_PASSWORD)`",
+      "pattern": "Off by one"
+    }
+  ]
+}

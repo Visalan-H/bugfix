@@ -1,0 +1,50 @@
+{
+  "id": "m10",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Projects shared by many companies",
+  "minutes": 30,
+  "tagline": "Search shows other companies' projects, any member can delete anything, and admins reach into other companies.",
+  "tags": [
+    "tenant isolation",
+    "|| with strings",
+    "authorization"
+  ],
+  "lookFor": [
+    "When many companies share one app, EVERY query must filter by company.",
+    "`role === 'admin' || 'owner'` is always true, because non-empty text counts as true.",
+    "`findById` ignores the company. Load with `{ _id, tenantId }`."
+  ],
+  "bugs": [
+    {
+      "symptom": "Search shows other companies' projects",
+      "file": "src/projects.js",
+      "hints": [
+        "Compare the filter in `list` with the one in `search`."
+      ],
+      "cause": "`search` doesn't filter by company, so it returns everyone's projects.",
+      "fix": "`projects.find({ tenantId, name: { ... } })`",
+      "pattern": "Missing company filter"
+    },
+    {
+      "symptom": "A plain member can delete any project",
+      "file": "src/projects.js",
+      "hints": [
+        "Work out `role === 'admin' || 'owner'` when role is 'member'."
+      ],
+      "cause": "`|| 'owner'` is always true, so the permission check always passes.",
+      "fix": "`if (role !== 'admin' && p.ownerId !== userId) throw new HttpError(403, ...)`",
+      "pattern": "|| with plain text"
+    },
+    {
+      "symptom": "An admin from company B can delete company A's project",
+      "file": "src/projects.js",
+      "hints": [
+        "How is the project loaded in `remove`?"
+      ],
+      "cause": "`findById` doesn't check the company, so an admin anywhere can delete it.",
+      "fix": "`projects.findOne({ _id: id, tenantId })` and return 404 if it's not found.",
+      "pattern": "Reaching into another company"
+    }
+  ]
+}

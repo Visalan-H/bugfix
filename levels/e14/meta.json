@@ -1,0 +1,50 @@
+{
+  "id": "e14",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Game leaderboard",
+  "minutes": 15,
+  "tagline": "New players score NaN, ranks start at 0, and 'top 3' is just the first 3 who joined.",
+  "tags": [
+    "NaN",
+    "ranking",
+    "order of operations"
+  ],
+  "lookFor": [
+    "`Math.max(x, undefined)` is NaN (not a number).",
+    "Ranks start at 1. Equal scores share a rank (1, 2, 2, 4).",
+    "Sort first, THEN take the top few."
+  ],
+  "bugs": [
+    {
+      "symptom": "A new player's score is null",
+      "file": "src/board.js",
+      "hints": [
+        "For a new player, what is `existing?.score`? What does Math.max do with it?"
+      ],
+      "cause": "A new player has no old score, so it's `undefined`, and `Math.max(50, undefined)` is NaN.",
+      "fix": "`const best = existing ? Math.max(score, existing.score) : score;`",
+      "pattern": "NaN from undefined"
+    },
+    {
+      "symptom": "Ranks start at 0 and ties don't share a rank",
+      "file": "src/board.js",
+      "hints": [
+        "`map((p, i) => ({ rank: i }))`: what is the first i?"
+      ],
+      "cause": "The list position starts at 0, and it ignores ties.",
+      "fix": "Rank = previous rank if the score ties, otherwise position + 1. See the reference fix.",
+      "pattern": "List position used as rank"
+    },
+    {
+      "symptom": "top=2 returns the wrong players",
+      "file": "src/board.js",
+      "hints": [
+        "Which happens first: slice or sort?"
+      ],
+      "cause": "It takes the first few BEFORE sorting, so 'top 3' is just the first 3 added.",
+      "fix": "Sort, then slice.",
+      "pattern": "Wrong order of steps"
+    }
+  ]
+}

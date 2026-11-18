@@ -1,0 +1,4 @@
+/* Keep section headings clear of the sticky top bar when the Guide contents scroll to them. */
+.pb h2 {
+  scroll-margin-top: 72px;
+}

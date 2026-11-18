@@ -1,0 +1,76 @@
+{
+  "id": "h1",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "Movie search: five rules, four layers",
+  "minutes": 45,
+  "tagline": "Based on a real Amazon test (asked in Spring Boot): a movie search that must follow 5 rules, with the logic spread over 4 files.",
+  "tags": [
+    "validation",
+    "regex",
+    "operator precedence",
+    "sorting",
+    "layered tracing"
+  ],
+  "lookFor": [
+    "Write each rule as one line. Then find the ONE place in the code that handles it.",
+    "`indexOf` gives 0 for the first item (counts as false) and -1 for 'not found' (counts as true). Use `includes`.",
+    "Search patterns need the `i` flag to ignore capitals, and special characters like `(` must be escaped.",
+    "`a || b ? x : y` runs as `(a || b) ? x : y`. Add brackets.",
+    "'At least' means `$gte`. `Number('abc')` is NaN and slips past `< 0` and `> 10`."
+  ],
+  "bugs": [
+    {
+      "symptom": "field=director is rejected with 400",
+      "file": "src/controllers/movieController.js",
+      "hints": [
+        "What does `['title','director','genre'].indexOf('director')` give? Does it count as true?"
+      ],
+      "cause": "`indexOf` gives 0 for 'title' (false, so allowed) but 1 for 'director' (true, so rejected).",
+      "fix": "`if (!ALLOWED_FIELDS.includes(field)) return res.status(400)...`",
+      "pattern": "indexOf used as true/false"
+    },
+    {
+      "symptom": "Search is case-sensitive (and '(500' crashes)",
+      "file": "src/repositories/movieRepo.js",
+      "hints": [
+        "How is the search pattern built? Does it ignore capitals?",
+        "What happens with `new RegExp('(500')`?"
+      ],
+      "cause": "No `i` flag, so 'nolan' doesn't match 'Nolan'. Special characters like `(` also crash it.",
+      "fix": "Escape the text and add `$options: 'i'`. See the reference fix.",
+      "pattern": "Search pattern not safe"
+    },
+    {
+      "symptom": "Whitespace-only q returns nothing",
+      "file": "src/services/searchService.js",
+      "hints": [
+        "Rule 3 says trim first. Where does the code trim?"
+      ],
+      "cause": "`q` is never trimmed, so '   ' is searched as three spaces and finds nothing.",
+      "fix": "`const term = (q || '').trim(); if (!term) ...`",
+      "pattern": "Not trimmed"
+    },
+    {
+      "symptom": "Results come back in the wrong order",
+      "file": "src/utils/sort.js",
+      "hints": [
+        "Add brackets the way JavaScript reads the line."
+      ],
+      "cause": "The line runs as `(rating diff || title compare) ? 1 : -1`, so it only ever returns 1 or -1.",
+      "fix": "`(a, b) => b.rating - a.rating || a.title.localeCompare(b.title)`",
+      "pattern": "Missing brackets"
+    },
+    {
+      "symptom": "minRating leaves out the exact rating and accepts junk",
+      "file": "src/repositories/movieRepo.js + controller",
+      "hints": [
+        "The rule says 'at least'. Which operator is used?",
+        "Does `NaN < 0 || NaN > 10` catch 'abc'?"
+      ],
+      "cause": "`$gt` leaves out the exact rating. 'abc' becomes NaN, which passes the range check.",
+      "fix": "Use `$gte` in the repo, and add `Number.isNaN(minRating) ||` to the check.",
+      "pattern": "'At least' and NaN"
+    }
+  ]
+}

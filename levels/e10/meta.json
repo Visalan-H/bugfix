@@ -1,0 +1,50 @@
+{
+  "id": "e10",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Feature flag service",
+  "minutes": 15,
+  "tagline": "'false' counts as on, unknown flags crash, and a 0% rollout still reaches people.",
+  "tags": [
+    "truthy strings",
+    "missing keys",
+    "modulo of negatives"
+  ],
+  "lookFor": [
+    "Settings from files are often text. The text `'false'` counts as true in an `if`.",
+    "Looking up a name that might not exist? Check for `undefined` first.",
+    "In JavaScript, `-25 % 100` is -25, not 75. Make the number positive first."
+  ],
+  "bugs": [
+    {
+      "symptom": "A flag set to 'false' is on",
+      "file": "src/flags.js",
+      "hints": [
+        "Look at how `enabled` is written in config.js. Is it true/false or text?"
+      ],
+      "cause": "`enabled` is the text 'false'. Any non-empty text counts as true, so the flag is on.",
+      "fix": "`const on = flag.enabled === true || flag.enabled === 'true'; if (!on) return false;`",
+      "pattern": "Text 'false' counts as true"
+    },
+    {
+      "symptom": "Unknown flag → 500",
+      "file": "src/flags.js",
+      "hints": [
+        "What is `FLAGS['nope']`?"
+      ],
+      "cause": "The flag is `undefined`, and reading `.enabled` from it crashes.",
+      "fix": "`if (!flag) return false;`",
+      "pattern": "Missing name not handled"
+    },
+    {
+      "symptom": "A 0% rollout enables users anyway",
+      "file": "src/flags.js",
+      "hints": [
+        "Log `bucket` for user-1. Can it be negative?"
+      ],
+      "cause": "The hash can be negative, and `%` keeps the minus sign. A negative number is always below the rollout, so the user gets the flag.",
+      "fix": "`const bucket = (hash(userId) >>> 0) % 100;` (`>>> 0` makes it positive)",
+      "pattern": "Negative remainder"
+    }
+  ]
+}

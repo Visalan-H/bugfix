@@ -1,0 +1,51 @@
+{
+  "id": "e13",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Request validation gone wrong",
+  "minutes": 15,
+  "tagline": "Age 0 is rejected, every list of tags is rejected, and 'hello a@b.co' passes as an email.",
+  "tags": [
+    "falsy 0",
+    "typeof",
+    "regex anchors",
+    "integers"
+  ],
+  "lookFor": [
+    "`!age` is true when age is 0. If 0 is valid, check the type and range instead.",
+    "`typeof` never says 'array'. Use `Array.isArray`.",
+    "A check pattern needs `^` at the start and `$` at the end, or it matches part of the text."
+  ],
+  "bugs": [
+    {
+      "symptom": "age 0 is rejected (and 25.5 accepted)",
+      "file": "src/validate.js",
+      "hints": [
+        "What is `!0`?"
+      ],
+      "cause": "`!age` is true for 0, so a valid age is rejected. It also lets 25.5 through.",
+      "fix": "`if (!Number.isInteger(age) || age < 0 || age > 120)`",
+      "pattern": "0 treated as missing"
+    },
+    {
+      "symptom": "Any request with tags gets 400",
+      "file": "src/validate.js",
+      "hints": [
+        "What does `typeof ['a']` give?"
+      ],
+      "cause": "`typeof` gives 'object' for lists, never 'array'. So every list fails the check.",
+      "fix": "`if (!Array.isArray(tags) || tags.length > 5 || !tags.every((t) => typeof t === 'string'))`",
+      "pattern": "typeof 'array'"
+    },
+    {
+      "symptom": "'hello a@b.co' passes as an email",
+      "file": "src/validate.js",
+      "hints": [
+        "Does the pattern have to match the WHOLE text?"
+      ],
+      "cause": "Without `^` and `$`, the pattern matches if any part of the text looks like an email.",
+      "fix": "Add `^` at the start and `$` at the end of the email pattern.",
+      "pattern": "Pattern not anchored"
+    }
+  ]
+}

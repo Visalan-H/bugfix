@@ -1,0 +1,27 @@
+name: CI
+
+# Every branch push, so work branches get checked before a pull request exists.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - name: Sandbox self-test
+        run: npm run test:sandbox
+      - name: Verify every level (buggy fails, fix passes)
+        run: npm run verify
+      - run: npm run build
+      - name: Check no answers are readable in the build
+        run: npm run check:leaks

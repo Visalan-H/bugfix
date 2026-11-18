@@ -1,0 +1,63 @@
+{
+  "id": "e4",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Signup & profile: leaks and mass assignment",
+  "minutes": 20,
+  "tagline": "Nobody can sign up, replies leak password hashes, and users can make themselves admin.",
+  "tags": [
+    "missing await",
+    "data exposure",
+    "mass assignment",
+    "uniqueness"
+  ],
+  "lookFor": [
+    "`if (somePromise)` is always true. Did someone forget `await`?",
+    "Removing a field from a copy only helps if you send that copy.",
+    "Never save `req.body` as it is. Pick only the fields users may change.",
+    "Compare emails in lowercase, the same way you save them."
+  ],
+  "bugs": [
+    {
+      "symptom": "Every signup returns 409 'email already registered'",
+      "file": "src/services/userService.js",
+      "hints": [
+        "What is `existing` when nobody has that email? Log it.",
+        "Is `repo.findByEmail` awaited?"
+      ],
+      "cause": "Without `await`, `existing` is a Promise. A Promise always counts as true, so every signup looks like a duplicate.",
+      "fix": "`const existing = await repo.findByEmail(email);`",
+      "pattern": "Missing await in an if"
+    },
+    {
+      "symptom": "Signup response contains passwordHash",
+      "file": "src/services/userService.js",
+      "hints": [
+        "Find where `passwordHash` is removed. Which variable is returned after that?"
+      ],
+      "cause": "The code makes `safe` without the hash, but returns `user`, which still has it.",
+      "fix": "`return safe;` (or `return toPublic(user);`)",
+      "pattern": "Leaking a secret field"
+    },
+    {
+      "symptom": "A user can make themselves admin via PATCH /users/me",
+      "file": "src/services/userService.js",
+      "hints": [
+        "What exactly is passed to `repo.update` in `updateProfile`?"
+      ],
+      "cause": "The whole request body is saved, so a user can send `role: 'admin'` and become admin.",
+      "fix": "Keep only allowed fields: `pick(changes, ['name', 'bio'])`",
+      "pattern": "Saving everything the user sends"
+    },
+    {
+      "symptom": "Hidden test: 'A@x.com' and 'a@x.com' become two accounts",
+      "file": "src/services/userService.js",
+      "hints": [
+        "What form is saved, and what form is searched?"
+      ],
+      "cause": "Emails are saved as typed, so 'A@x.com' and 'a@x.com' count as different people.",
+      "fix": "At signup: `email = email.trim().toLowerCase()` before the check and the save.",
+      "pattern": "Not cleaned up"
+    }
+  ]
+}
