@@ -29,7 +29,7 @@ js.setCompilerOptions({
   noEmit: true,
 });
 // Syntax errors only. The sandbox's packages aren't real files, so deeper checks would be noise.
-js.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false });
+js.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false, noSuggestionDiagnostics: true });
 // Every file is known to the language service, so go-to-definition works across files.
 js.setEagerModelSync(true);
 js.addExtraLib(EXPRESS_D_TS, 'file:///node_modules/@types/express/index.d.ts');
