@@ -1,0 +1,62 @@
+{
+  "id": "m7",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Coupon engine",
+  "minutes": 30,
+  "tagline": "The minimum order leaves out the minimum, percent discounts have no limit, one person's use blocks everyone, and coupons end a day early.",
+  "tags": [
+    "thresholds",
+    "caps",
+    "per-user limits",
+    "date boundaries"
+  ],
+  "lookFor": [
+    "'Minimum ₹300' means 300 is OK.",
+    "A percent discount with a limit: `Math.min(total * pct / 100, max)`.",
+    "'Once per user' must count by user. Check every `count({...})`.",
+    "'Valid until Dec 31' means until the END of Dec 31."
+  ],
+  "bugs": [
+    {
+      "symptom": "Order of exactly ₹300 can't use WELCOME50",
+      "file": "src/coupons.js",
+      "hints": [
+        "`>` or `>=`?"
+      ],
+      "cause": "`> 300` leaves out 300 itself.",
+      "fix": "`if (orderTotal < c.minOrder) throw ...`",
+      "pattern": "Off by one"
+    },
+    {
+      "symptom": "BIG20 gives ₹400 off a ₹2000 order",
+      "file": "src/coupons.js",
+      "hints": [
+        "Where is `maxDiscount` used?"
+      ],
+      "cause": "The ₹200 limit is written down but never used.",
+      "fix": "`Math.min(orderTotal * c.percent / 100, c.maxDiscount ?? Infinity)`",
+      "pattern": "Limit not applied"
+    },
+    {
+      "symptom": "Second user is told they already used WELCOME50",
+      "file": "src/coupons.js",
+      "hints": [
+        "What does the count filter on?"
+      ],
+      "cause": "It counts uses of the code by anyone, so after one person uses it, nobody else can.",
+      "fix": "`redemptions.count({ code: c.code, userId })`",
+      "pattern": "Counted for everyone"
+    },
+    {
+      "symptom": "Hidden test: Coupon expires at 00:00 on its last day",
+      "file": "src/coupons.js",
+      "hints": [
+        "`Date.parse('2026-12-31')` is which moment of that day?"
+      ],
+      "cause": "It's midnight at the START of Dec 31, so the coupon stops working a day early.",
+      "fix": "Add one day: `if (clock.now() >= Date.parse(c.validUntil) + DAY_MS) ...`",
+      "pattern": "Ends a day early"
+    }
+  ]
+}

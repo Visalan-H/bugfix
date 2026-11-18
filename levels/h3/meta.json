@@ -1,0 +1,73 @@
+{
+  "id": "h3",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "Notifications: cursors, soft deletes & async forEach",
+  "minutes": 40,
+  "tagline": "Scrolling shows duplicates, 'mark all read' half works, deleted items still count, and anyone can delete anything.",
+  "tags": [
+    "cursor pagination",
+    "async loops",
+    "soft delete",
+    "IDOR"
+  ],
+  "lookFor": [
+    "The next page starts AFTER the last item: `$lt`, not `$lte`.",
+    "`forEach(async ...)` doesn't wait. Use `await Promise.all(list.map(...))`.",
+    "Hidden-but-not-deleted items must be filtered out EVERYWHERE, counts included.",
+    "Every `/:id` change must check the item belongs to the user.",
+    "When nothing is left, `nextCursor` must be null."
+  ],
+  "bugs": [
+    {
+      "symptom": "Page 2 repeats the last item of page 1",
+      "file": "src/repositories/notificationRepo.js",
+      "hints": [
+        "Should page 2 include the last item of page 1?"
+      ],
+      "cause": "`$lte` includes the cursor item again, so it shows twice.",
+      "fix": "`seq: { $lt: cursor }`",
+      "pattern": "Page overlap"
+    },
+    {
+      "symptom": "Unread count includes deleted notifications",
+      "file": "src/repositories/notificationRepo.js",
+      "hints": [
+        "Compare the filter in `list` with the one in `countUnread`."
+      ],
+      "cause": "The count forgets `deletedAt: null`.",
+      "fix": "`items.count({ userId, read: false, deletedAt: null })`",
+      "pattern": "Deleted still counted"
+    },
+    {
+      "symptom": "'Mark all read' leaves unread items",
+      "file": "src/services/notificationService.js",
+      "hints": [
+        "Does `forEach` wait for async work?"
+      ],
+      "cause": "The reply goes out before the saves finish.",
+      "fix": "`await Promise.all(unread.map((n) => repo.markRead(n._id)));`",
+      "pattern": "forEach doesn't wait"
+    },
+    {
+      "symptom": "nextCursor is set on the last page",
+      "file": "src/services/notificationService.js",
+      "hints": [
+        "How do you know there's another page?"
+      ],
+      "cause": "`nextCursor` is always set, even on the last page.",
+      "fix": "Ask for one extra item. If you get it, there's more. See the reference fix.",
+      "pattern": "No end-of-list check"
+    },
+    {
+      "symptom": "Hidden test: Users can delete other users' notifications",
+      "file": "src/services/notificationService.js",
+      "hints": [
+        "Is `userId` used in `remove` at all?"
+      ],
+      "cause": "Anyone can delete any notification.",
+      "fix": "`if (!n || n.userId !== userId || n.deletedAt !== null) throw new NotFoundError(...)`",
+      "pattern": "No owner check"
+    }
+  ]
+}

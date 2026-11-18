@@ -1,0 +1,62 @@
+{
+  "id": "m12",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Webhook retries & signatures",
+  "minutes": 30,
+  "tagline": "`^` isn't 'power of', the limit uses Math.max, retries stop one try late, and capital-letter signatures fail.",
+  "tags": [
+    "XOR vs **",
+    "min/max",
+    "retry limits",
+    "case-insensitive compare"
+  ],
+  "lookFor": [
+    "`2 ^ n` is NOT 2 to the power n in JavaScript. Use `2 ** n`.",
+    "To set a top limit, use `Math.min(value, limit)`.",
+    "'Stop after 5 tries' means try 5 is the last one: `>= 5`.",
+    "Hex codes can be in capitals. Make both sides lowercase before comparing."
+  ],
+  "bugs": [
+    {
+      "symptom": "First retry delay is 2000 ms instead of 1000",
+      "file": "src/retry.js",
+      "hints": [
+        "What is `1000 * 2 ^ 0` in JavaScript?"
+      ],
+      "cause": "`^` is a bit operation, not 'to the power of'. It also runs after `*`.",
+      "fix": "`BASE_MS * 2 ** (attempts - 1)`",
+      "pattern": "^ is not power"
+    },
+    {
+      "symptom": "Delays are never below the cap",
+      "file": "src/retry.js",
+      "hints": [
+        "Which one sets a TOP limit: Math.min or Math.max?"
+      ],
+      "cause": "`Math.max(delay, 5000)` makes every wait at least 5000.",
+      "fix": "`Math.min(delay, MAX_DELAY_MS)`",
+      "pattern": "max instead of min"
+    },
+    {
+      "symptom": "Delivery is still pending after 5 failures",
+      "file": "src/retry.js",
+      "hints": [
+        "After the 5th failure, attempts = 5. Is `5 > 5` true?"
+      ],
+      "cause": "`> 5` waits for a 6th failure.",
+      "fix": "`attempts >= MAX_ATTEMPTS`",
+      "pattern": "Off by one"
+    },
+    {
+      "symptom": "Hidden test: Uppercase signature rejected",
+      "file": "src/signature.js",
+      "hints": [
+        "What case does `toString(16)` give?"
+      ],
+      "cause": "Signatures in capitals don't equal the lowercase version.",
+      "fix": "`String(signature).toLowerCase() === sign(payload)`",
+      "pattern": "Capitals don't match"
+    }
+  ]
+}

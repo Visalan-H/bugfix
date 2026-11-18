@@ -1,0 +1,61 @@
+{
+  "id": "m9",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Order state machine",
+  "minutes": 30,
+  "tagline": "Status changes are checked backwards, no header means staff powers, and replies show the old status.",
+  "tags": [
+    "state machines",
+    "insecure defaults",
+    "stale responses"
+  ],
+  "lookFor": [
+    "Look up allowed moves by the CURRENT status: `ALLOWED[current].includes(next)`.",
+    "When a role is missing, default to the LEAST powerful one.",
+    "After saving, reply with what was saved, not the old copy.",
+    "Unknown status names should get a 400."
+  ],
+  "bugs": [
+    {
+      "symptom": "placed → paid is rejected",
+      "file": "src/orders.js",
+      "hints": [
+        "Read `ALLOWED[to].includes(order.status)`. Which status is the key?"
+      ],
+      "cause": "It asks 'can the new status move to the old one?', which is backwards.",
+      "fix": "`ALLOWED[order.status].includes(to)`",
+      "pattern": "Table read backwards"
+    },
+    {
+      "symptom": "Requests without x-role can ship orders",
+      "file": "src/app.js",
+      "hints": [
+        "What role does a request with no header get?"
+      ],
+      "cause": "No header means 'staff', so anyone gets staff powers.",
+      "fix": "Default to `'customer'`.",
+      "pattern": "Unsafe default"
+    },
+    {
+      "symptom": "Response shows the previous status",
+      "file": "src/orders.js",
+      "hints": [
+        "Which object is returned after the update?"
+      ],
+      "cause": "It returns the order as it was BEFORE the update.",
+      "fix": "`return orders.updateById(id, ...)`",
+      "pattern": "Replying with the old copy"
+    },
+    {
+      "symptom": "Hidden test: to='teleported' → 500",
+      "file": "src/orders.js",
+      "hints": [
+        "What is `ALLOWED['teleported']`?"
+      ],
+      "cause": "It's undefined, and using it crashes.",
+      "fix": "`if (!(to in ALLOWED)) throw new HttpError(400, 'unknown status')`",
+      "pattern": "Unknown value not checked"
+    }
+  ]
+}

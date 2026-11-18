@@ -1,0 +1,65 @@
+{
+  "id": "h4",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "API rate limiter middleware",
+  "minutes": 40,
+  "tagline": "A rate limiter that never limits, puts every client in one bucket, and says 'wait 40,000 seconds'.",
+  "tags": [
+    "middleware",
+    "header casing",
+    "sliding window",
+    "units",
+    "state"
+  ],
+  "lookFor": [
+    "If the limiter 'does nothing', log the key and the list of times.",
+    "`req.headers` uses lowercase names. `req.headers['X-Api-Key']` is always undefined.",
+    "Keep times NEWER than `now - window`. Say the comparison out loud.",
+    "Retry-After is in SECONDS, rounded up.",
+    "Blocked requests should not count."
+  ],
+  "bugs": [
+    {
+      "symptom": "The 6th request still gets 200",
+      "file": "src/middleware/rateLimit.js",
+      "hints": [
+        "Log `hits` after the filter. What's kept?",
+        "We want the last 60 seconds: t > now - window."
+      ],
+      "cause": "It keeps the OLD times and throws away the new ones, so the count never grows.",
+      "fix": "`filter((t) => t > now - windowMs)`",
+      "pattern": "Comparison flipped"
+    },
+    {
+      "symptom": "One client's traffic blocks every other client",
+      "file": "src/middleware/rateLimit.js",
+      "hints": [
+        "Log the key. Is it what you expect?"
+      ],
+      "cause": "`req.headers['X-Api-Key']` is undefined, so all clients share one bucket.",
+      "fix": "`const key = req.get('x-api-key');`",
+      "pattern": "Header name capitals"
+    },
+    {
+      "symptom": "Retry-After is 40000",
+      "file": "src/middleware/rateLimit.js",
+      "hints": [
+        "What unit is the difference of two times? What unit does Retry-After use?"
+      ],
+      "cause": "It sends milliseconds, but the header is in seconds.",
+      "fix": "`Math.ceil((hits[0] + windowMs - now) / 1000)`",
+      "pattern": "ms vs seconds"
+    },
+    {
+      "symptom": "Hidden test: A client that retries while blocked never recovers",
+      "file": "src/middleware/rateLimit.js",
+      "hints": [
+        "Is the time saved before or after the limit check?"
+      ],
+      "cause": "Blocked requests are counted too, so a client that keeps trying stays blocked forever.",
+      "fix": "Check the limit first. Only save the time for allowed requests.",
+      "pattern": "Blocked requests counted"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "id": "e2",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Product catalog: pagination & sorting",
+  "minutes": 20,
+  "tagline": "Page 1 skips items, page 2 shows too many, and sorting does nothing.",
+  "tags": [
+    "pagination",
+    "type coercion",
+    "sort",
+    "shared state"
+  ],
+  "lookFor": [
+    "Skipping items for a page: `(page - 1) * limit`. Check page 1 and page 2.",
+    "URL values are text. `2 + '2'` gives `'22'`, not 4.",
+    "A sort function must return a number (negative, zero or positive), not true/false.",
+    "`.sort()` changes the original list. Sort a copy instead."
+  ],
+  "bugs": [
+    {
+      "symptom": "Page 1 skips the first products",
+      "file": "src/services/catalogService.js",
+      "hints": [
+        "With page=1 and limit=3, which item should come first?",
+        "Look at how `skip` is worked out."
+      ],
+      "cause": "`page * limit` starts page 1 at item 4. Pages start at 1, so take 1 away first.",
+      "fix": "`const skip = (page - 1) * limit;`",
+      "pattern": "Page off by one"
+    },
+    {
+      "symptom": "Page 2 returns way too many items",
+      "file": "src/services/catalogService.js",
+      "hints": [
+        "Log `typeof limit` when it comes from the URL.",
+        "What is `2 + '2'` in JavaScript?"
+      ],
+      "cause": "`limit` is the text `'2'`. So `skip + limit` sticks them together as `'22'`, and the page gets far too many items.",
+      "fix": "Turn them into numbers first: `page = Number(page) || 1; limit = Number(limit) || DEFAULT_LIMIT;`",
+      "pattern": "Text + number"
+    },
+    {
+      "symptom": "sort=price_asc doesn't sort",
+      "file": "src/services/catalogService.js",
+      "hints": [
+        "What does the sort function return? What does `.sort()` expect?"
+      ],
+      "cause": "`a.price > b.price` returns true or false. Sort needs a negative number to move things, so the order barely changes.",
+      "fix": "`(a, b) => a.price - b.price` (and `b.price - a.price` for high to low)",
+      "pattern": "Sort returns true/false"
+    },
+    {
+      "symptom": "Hidden test: Sorting once changes the default order for everyone",
+      "file": "src/services/catalogService.js",
+      "hints": [
+        "When there's no category, is `items` the same list as `products`?",
+        "Does `.sort()` make a new list?"
+      ],
+      "cause": "`.sort()` changes the list it's called on. That list is shared by every request, so one sorted request changes the order for everyone after.",
+      "fix": "Sort a copy: `return [...items].sort(...)`",
+      "pattern": "Changing a shared list"
+    }
+  ]
+}

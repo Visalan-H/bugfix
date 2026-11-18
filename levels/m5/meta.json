@@ -1,0 +1,62 @@
+{
+  "id": "m5",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Bank transfers",
+  "minutes": 30,
+  "tagline": "Negative transfers steal money, the wrong account is checked, and money disappears into accounts that don't exist.",
+  "tags": [
+    "validation",
+    "authorization",
+    "partial writes",
+    "money"
+  ],
+  "lookFor": [
+    "Money: the amount must be a number above 0. `!amount` lets negative numbers through.",
+    "Check the user owns the account the money LEAVES.",
+    "Check everything (both accounts, enough money, owner) BEFORE changing anything.",
+    "Edge cases: sending to yourself, 0, text instead of a number."
+  ],
+  "bugs": [
+    {
+      "symptom": "A negative amount moves money backwards",
+      "file": "src/transferService.js",
+      "hints": [
+        "What is `!(-100)`?"
+      ],
+      "cause": "`!amount` only blocks 0. A negative amount moves money backwards.",
+      "fix": "`if (typeof amount !== 'number' || !(amount > 0)) throw new HttpError(400, ...)`",
+      "pattern": "Negatives allowed"
+    },
+    {
+      "symptom": "Users can transfer from someone else's account",
+      "file": "src/transferService.js",
+      "hints": [
+        "Which account does the owner check look at?"
+      ],
+      "cause": "It checks who owns `to`, not `from`. Anyone can take money from any account.",
+      "fix": "`if (from.owner !== userId) throw new HttpError(403, ...)`",
+      "pattern": "Checking the wrong account"
+    },
+    {
+      "symptom": "Transfer to an unknown account loses the money",
+      "file": "src/transferService.js",
+      "hints": [
+        "When is `to` looked up: before or after the money is taken?"
+      ],
+      "cause": "Money is taken first. Then `to` turns out not to exist, but the money is already gone.",
+      "fix": "Load and check both accounts first, then move the money.",
+      "pattern": "Saving before checking"
+    },
+    {
+      "symptom": "Hidden test: Self-transfer is allowed",
+      "file": "src/transferService.js",
+      "hints": [
+        "What if from and to are the same?"
+      ],
+      "cause": "Nothing stops sending money to the same account.",
+      "fix": "`if (fromId === toId) throw new HttpError(400, 'cannot transfer to the same account')`",
+      "pattern": "Missing check"
+    }
+  ]
+}

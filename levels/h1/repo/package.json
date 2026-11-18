@@ -1,0 +1,7 @@
+{
+  "name": "movie-db",
+  "version": "4.1.0",
+  "scripts": { "test": "jest" },
+  "dependencies": { "express": "^5.0.0", "memdb": "1.0.0" },
+  "devDependencies": { "jest": "^29.0.0", "supertest": "^7.0.0" }
+}

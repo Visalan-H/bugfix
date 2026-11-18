@@ -1,0 +1,62 @@
+{
+  "id": "h7",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "Job queue workers",
+  "minutes": 40,
+  "tagline": "Two workers grab the same job, the newest job runs first, anyone can finish anyone's job, and crashed jobs never restart.",
+  "tags": [
+    "atomic claim",
+    "FIFO",
+    "ownership",
+    "leases"
+  ],
+  "lookFor": [
+    "Taking a job must be ONE step: 'queued' → 'running'.",
+    "Queues run oldest first.",
+    "Only the worker holding a job can finish it.",
+    "A running job whose time is up can be taken again. Check the comparison."
+  ],
+  "bugs": [
+    {
+      "symptom": "Two concurrent claims get the same job",
+      "file": "src/queue.js",
+      "hints": [
+        "Between `find` and `updateById`, can another worker get in?"
+      ],
+      "cause": "Two workers read the same queued job and both take it.",
+      "fix": "`jobs.findOneAndUpdate({ status: 'queued' }, { $set: { status: 'running', worker, leaseUntil } })`",
+      "pattern": "Two requests clash"
+    },
+    {
+      "symptom": "Newest job is claimed first",
+      "file": "src/queue.js",
+      "hints": [
+        "Read the sort."
+      ],
+      "cause": "It sorts newest first.",
+      "fix": "Oldest first (the one-step claim already picks the oldest).",
+      "pattern": "Sorted the wrong way"
+    },
+    {
+      "symptom": "Worker B can complete worker A's job",
+      "file": "src/queue.js",
+      "hints": [
+        "Does `complete()` look at `worker`?"
+      ],
+      "cause": "Any worker can finish any job.",
+      "fix": "`findOneAndUpdate({ _id: id, worker, status: 'running' }, { $set: { status: 'done' } })`",
+      "pattern": "No owner check"
+    },
+    {
+      "symptom": "Hidden test: Live jobs get stolen; crashed workers' jobs are never retried",
+      "file": "src/queue.js",
+      "hints": [
+        "When can a running job be taken again: before or after its time is up?"
+      ],
+      "cause": "It takes jobs that are still in use and never takes timed-out ones.",
+      "fix": "Also try `{ status: 'running', leaseUntil: { $lte: now } }`.",
+      "pattern": "Comparison flipped"
+    }
+  ]
+}

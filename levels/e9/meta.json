@@ -1,0 +1,50 @@
+{
+  "id": "e9",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Shipping fee calculator",
+  "minutes": 15,
+  "tagline": "A switch with a missing break, rounding the wrong way, and a free-shipping limit off by one rupee.",
+  "tags": [
+    "switch fallthrough",
+    "rounding",
+    "thresholds"
+  ],
+  "lookFor": [
+    "Every `case` in a switch needs `break` (or `return`). Otherwise it runs the next case too.",
+    "'Per started kg' means round UP: `Math.ceil`.",
+    "'₹499 or more' means `>= 499`."
+  ],
+  "bugs": [
+    {
+      "symptom": "Local delivery is charged the regional fee",
+      "file": "src/fees.js",
+      "hints": [
+        "Read `case 'local'`. What runs after it?"
+      ],
+      "cause": "`case 'local'` has no `break`, so it also runs `case 'regional'` and the fee becomes 60.",
+      "fix": "Add `break;`, or simply `return 40;` in each case.",
+      "pattern": "Missing break in switch"
+    },
+    {
+      "symptom": "2.2 kg is charged as 1 extra kg",
+      "file": "src/fees.js",
+      "hints": [
+        "The rule says per STARTED kg. What is `Math.round(1.2)`?"
+      ],
+      "cause": "`Math.round(1.2)` is 1, but every started kg counts, so it should be 2.",
+      "fix": "`Math.ceil(Math.max(0, weightKg - 1))`",
+      "pattern": "Round instead of round up"
+    },
+    {
+      "symptom": "An order of exactly ₹499 still pays shipping",
+      "file": "src/fees.js",
+      "hints": [
+        "'499 or more': which sign is that?"
+      ],
+      "cause": "`> 499` leaves out 499 itself.",
+      "fix": "`if (orderTotal >= FREE_FROM) return 0;`",
+      "pattern": "Off by one"
+    }
+  ]
+}

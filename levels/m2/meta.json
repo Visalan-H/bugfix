@@ -1,0 +1,76 @@
+{
+  "id": "m2",
+  "stack": "node",
+  "difficulty": "medium",
+  "title": "Support desk: tickets & replies",
+  "minutes": 35,
+  "tagline": "Based on a real Amazon test: a support ticket app where each bug hides the next one.",
+  "tags": [
+    "error middleware",
+    "route params",
+    "enums",
+    "boolean logic",
+    "Promise.all"
+  ],
+  "lookFor": [
+    "Getting 500 where you expect 404? Check the error handler first.",
+    "Route says `:ticketId` but the code reads `req.params.id`? That's undefined.",
+    "Compare status text with the exact capitals that are saved ('closed' vs 'CLOSED').",
+    "Write the rule in plain words first ('author OR agent may close'), then check the code.",
+    "`list.map(async ...)` gives a list of Promises. Wrap it in `await Promise.all(...)`."
+  ],
+  "bugs": [
+    {
+      "symptom": "Unknown ticket returns 500 instead of 404",
+      "file": "src/middleware/errorHandler.js",
+      "hints": [
+        "The service throws NotFoundError. In src/errors.js, which field holds the status?",
+        "Which field does the error handler read?"
+      ],
+      "cause": "Errors keep the code in `err.status`, but the handler reads `err.statusCode`. That's undefined, so every error becomes 500.",
+      "fix": "`const status = err.status || 500;`",
+      "pattern": "Error handler reads the wrong field"
+    },
+    {
+      "symptom": "Replying to a ticket says 'Ticket not found'",
+      "file": "src/controllers/ticketController.js",
+      "hints": [
+        "Compare the route path with what `addReply` reads from `req.params`."
+      ],
+      "cause": "The route is `/:ticketId/replies`, but the code reads `req.params.id`, which is undefined.",
+      "fix": "`service.addReply(req.params.ticketId, req.user, req.body.body)`",
+      "pattern": "Wrong route name"
+    },
+    {
+      "symptom": "Nobody can close a ticket (403)",
+      "file": "src/services/ticketService.js",
+      "hints": [
+        "Rule: the author OR an agent may close. When should we say no?",
+        "'Not (A or B)' is the same as 'not A AND not B'."
+      ],
+      "cause": "The 'forbidden' check uses `||`, so it says no to almost everyone. It should be `&&`.",
+      "fix": "`if (ticket.authorId !== user.id && user.role !== 'agent') throw new ForbiddenError(...)`",
+      "pattern": "|| instead of &&"
+    },
+    {
+      "symptom": "Closed tickets still accept replies",
+      "file": "src/services/ticketService.js",
+      "hints": [
+        "What exact text does closeTicket save? What does addReply compare it to?"
+      ],
+      "cause": "It saves 'closed' but checks for 'CLOSED', so the check never fires.",
+      "fix": "`if (ticket.status === 'closed')`",
+      "pattern": "Capitals don't match"
+    },
+    {
+      "symptom": "GET /tickets returns empty objects",
+      "file": "src/services/ticketService.js",
+      "hints": [
+        "Log what `listTickets` returns. What's inside the list?"
+      ],
+      "cause": "`tickets.map(async ...)` makes a list of Promises. Each one becomes `{}` in the reply.",
+      "fix": "`return Promise.all(tickets.map(async (t) => ({ ...t, replyCount: await repo.countReplies(t._id) })));`",
+      "pattern": "async map without Promise.all"
+    }
+  ]
+}

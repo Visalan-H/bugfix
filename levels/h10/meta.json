@@ -1,0 +1,62 @@
+{
+  "id": "h10",
+  "stack": "node",
+  "difficulty": "hard",
+  "title": "CSV customer import",
+  "minutes": 40,
+  "tagline": "Commas inside quotes break rows, error line numbers are wrong, '1,200' becomes 1, and duplicates get in.",
+  "tags": [
+    "parsing",
+    "line numbers",
+    "number formats",
+    "dedupe"
+  ],
+  "lookFor": [
+    "`split(',')` breaks text like \"Shah, Ankit\". Read the line character by character.",
+    "Line numbers should match the file: the header is line 1.",
+    "`parseInt('1,200')` is 1. Remove the commas, then use `Number()`.",
+    "Skip duplicate emails (ignore capitals) and empty lines."
+  ],
+  "bugs": [
+    {
+      "symptom": "\"Shah, Ankit\" splits into two columns",
+      "file": "src/csv.js",
+      "hints": [
+        "How does `parseLine` split fields?"
+      ],
+      "cause": "`split(',')` also splits on commas inside quotes.",
+      "fix": "Go character by character and track whether you're inside quotes. See the reference fix.",
+      "pattern": "Simple split breaks quotes"
+    },
+    {
+      "symptom": "Error says line 1 for the first data row",
+      "file": "src/importer.js",
+      "hints": [
+        "The header is line 1. What is the index of the first data row?"
+      ],
+      "cause": "It uses the list position (starting at 0, header not counted).",
+      "fix": "`line: i + 2`",
+      "pattern": "Line numbers off"
+    },
+    {
+      "symptom": "Amount \"1,200\" imports as 1",
+      "file": "src/importer.js",
+      "hints": [
+        "What does `parseInt` do when it hits a comma?"
+      ],
+      "cause": "`parseInt('1,200')` stops at the comma and gives 1.",
+      "fix": "`Number(raw.replace(/,/g, ''))`, then check it's a real number.",
+      "pattern": "parseInt stops at the comma"
+    },
+    {
+      "symptom": "Hidden test: Same email twice / blank lines",
+      "file": "src/importer.js",
+      "hints": [
+        "Is there a list of emails already seen? What does a last empty line become?"
+      ],
+      "cause": "Repeat emails are saved again, and empty lines become errors.",
+      "fix": "Skip empty lines. Keep a Set of lowercase emails and count repeats as skipped.",
+      "pattern": "Duplicates and empty lines"
+    }
+  ]
+}

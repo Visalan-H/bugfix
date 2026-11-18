@@ -1,0 +1,50 @@
+{
+  "id": "e11",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Comments: dates as strings",
+  "minutes": 15,
+  "tagline": "Dates saved as 'DD/MM/YYYY' text sort wrong, a filter is never read, and the count ignores the filter.",
+  "tags": [
+    "date strings",
+    "param names",
+    "counts"
+  ],
+  "lookFor": [
+    "Dates as text only sort correctly in 'YYYY-MM-DD' form. Turn other forms into numbers first.",
+    "Check the URL name the code reads against the one the API uses.",
+    "Count AFTER filtering."
+  ],
+  "bugs": [
+    {
+      "symptom": "Comments aren't newest first",
+      "file": "src/comments.js",
+      "hints": [
+        "How is `createdAt` saved? Which comes first as text: '28/12/2025' or '03/02/2026'?"
+      ],
+      "cause": "Text sorts by the first characters, which here is the day, not the full date.",
+      "fix": "Turn each date into a number (milliseconds) and sort by that. See the reference fix for a small `ts()` helper.",
+      "pattern": "Sorting date text"
+    },
+    {
+      "symptom": "?authorId= is ignored",
+      "file": "src/app.js",
+      "hints": [
+        "Which name does the handler read? Which name does the API use?"
+      ],
+      "cause": "The code reads `author`, but the API sends `authorId`, so the filter never runs.",
+      "fix": "`const { authorId } = req.query;`",
+      "pattern": "Wrong URL name"
+    },
+    {
+      "symptom": "total counts filtered-out comments",
+      "file": "src/app.js",
+      "hints": [
+        "Which list is `total` taken from?"
+      ],
+      "cause": "`total` is counted before the filter.",
+      "fix": "Count the filtered list.",
+      "pattern": "Counted too early"
+    }
+  ]
+}

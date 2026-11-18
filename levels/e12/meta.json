@@ -1,0 +1,50 @@
+{
+  "id": "e12",
+  "stack": "node",
+  "difficulty": "easy",
+  "title": "Warehouse low-stock report",
+  "minutes": 15,
+  "tagline": "Stock numbers saved as text: '9' isn't below '10', 0 turns into 5, and totals glue together.",
+  "tags": [
+    "string comparison",
+    "|| vs ??",
+    "concatenation"
+  ],
+  "lookFor": [
+    "Data from CSV files is text. As text, '9' comes after '10'.",
+    "`x || 5` turns 0 into 5. If 0 is allowed, check for 'missing' directly.",
+    "Adding text glues it together. Turn it into a number first."
+  ],
+  "bugs": [
+    {
+      "symptom": "Item with 9 units missing from the threshold=10 report",
+      "file": "src/report.js",
+      "hints": [
+        "What type is `item.stock`? Is `'9' <= '10'` true?"
+      ],
+      "cause": "Both sides are text, so they are compared letter by letter. '9' comes after '1', so 9 looks bigger than 10.",
+      "fix": "`Number(item.stock) <= threshold`",
+      "pattern": "Comparing numbers as text"
+    },
+    {
+      "symptom": "threshold=0 returns items with stock up to 5",
+      "file": "src/report.js",
+      "hints": [
+        "What is `Number('0') || 5`?"
+      ],
+      "cause": "0 counts as false, so `|| 5` replaces it with 5.",
+      "fix": "`const threshold = raw === undefined ? DEFAULT : Number(raw);`",
+      "pattern": "|| turns 0 into the default"
+    },
+    {
+      "symptom": "totalUnits is '0391'",
+      "file": "src/report.js",
+      "hints": [
+        "What is `0 + '0'`?"
+      ],
+      "cause": "Adding text values glues them together, like '0391'.",
+      "fix": "`s + Number(i.stock)`",
+      "pattern": "Adding text"
+    }
+  ]
+}
