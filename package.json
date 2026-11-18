@@ -16,7 +16,8 @@
     "format:check": "prettier --check .",
     "verify": "tsx scripts/verify-levels.ts",
     "test:sandbox": "tsx scripts/sandbox-selftest.ts",
-    "check:leaks": "tsx scripts/check-leaks.ts"
+    "check:leaks": "tsx scripts/check-leaks.ts",
+    "test:e2e": "node scripts/e2e.cjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
