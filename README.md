@@ -27,10 +27,14 @@ Hidden tests, fixes, hints and answer text are scrambled into a separate small f
 
 ## Layout
 
-| Path                  | What it is                                                                             |
-| --------------------- | -------------------------------------------------------------------------------------- |
-| `levels/<id>/`        | One folder per level: `meta.json`, `ticket.md`, `repo/`, `hidden.test.js`, `solution/` |
-| `src/runner/sandbox/` | The Node-like sandbox: memdb, mini Express, supertest, Jest, `require`                 |
-| `scripts/`            | `verify-levels.ts` (level check) and `migrate-bundles.ts` (one-off migration)          |
-| `prototype/`          | The old single-file version, kept as the reference until the port is done              |
-| `HANDOFF.md`          | The port plan                                                                          |
+| Path                        | What it is                                                                             |
+| --------------------------- | -------------------------------------------------------------------------------------- |
+| `src/level/`, `src/editor/` | The level page: Monaco editor, tabs, split view, console, timer                        |
+| `src/panels/`               | Task, Results, Hints, Notes, Answers and the changes popup                             |
+| `src/pages/`                | Home and Guide pages                                                                   |
+| `src/runner/`               | Runs tests in a Web Worker; stops code that never finishes                             |
+| `levels/<id>/`              | One folder per level: `meta.json`, `ticket.md`, `repo/`, `hidden.test.js`, `solution/` |
+| `src/runner/sandbox/`       | The Node-like sandbox: memdb, mini Express, supertest, Jest, `require`                 |
+| `scripts/`                  | `verify-levels.ts` (level check) and `migrate-bundles.ts` (one-off migration)          |
+| `prototype/`                | The old single-file version, kept as the reference until the port is done              |
+| `HANDOFF.md`                | The port plan                                                                          |
