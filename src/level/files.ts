@@ -4,7 +4,7 @@ import type { Files } from '../runner/sandbox/types';
 /** Files the user can't change: tests, package.json and docs. */
 export const isReadOnly = (p: string) => isTestFile(p) || p === 'package.json' || p.endsWith('.md');
 
-/** Folders first, then by name (like the prototype's file list). */
+/** Folders first, then by name (like most editors). */
 export function sortPaths(paths: string[]): string[] {
   return [...paths].sort((a, b) => {
     const da = a.includes('/');

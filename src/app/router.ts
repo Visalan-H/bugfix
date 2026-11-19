@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 // Hash routes: #/  ·  #/level/<id>  ·  #/guide
-// Old prototype links (#home, #level-e1, #playbook) still work.
+// Old links (#home, #level-e1, #playbook) still work.
 
 export type Route = { page: 'home' } | { page: 'level'; id: string } | { page: 'guide' };
 
@@ -15,7 +15,7 @@ export function parseRoute(hash: string): Route {
 
 export const href = (r: Route) => (r.page === 'level' ? `#/level/${r.id}` : r.page === 'guide' ? '#/guide' : '#/');
 
-/** Rewrites old prototype hashes to the new form, without adding a history entry. */
+/** Rewrites old hashes to the new form, without adding a history entry. */
 export function normalizeHash() {
   const h = location.hash;
   if (h === '' || h === '#' || h === '#/') return;

@@ -35,6 +35,5 @@ Hidden tests, fixes, hints and answer text are scrambled into a separate small f
 | `src/runner/`               | Runs tests in a Web Worker; stops code that never finishes                             |
 | `levels/<id>/`              | One folder per level: `meta.json`, `ticket.md`, `repo/`, `hidden.test.js`, `solution/` |
 | `src/runner/sandbox/`       | The Node-like sandbox: memdb, mini Express, supertest, Jest, `require`                 |
-| `scripts/`                  | `verify-levels.ts` (level check) and `migrate-bundles.ts` (one-off migration)          |
-| `prototype/`                | The old single-file version, kept as the reference until the port is done              |
+| `scripts/`                  | `verify-levels.ts` (level check), `check-leaks.ts`, `e2e.cjs` (browser test)           |
 | `HANDOFF.md`                | The port plan                                                                          |
