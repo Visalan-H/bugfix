@@ -4,6 +4,7 @@ import { DIFFICULTIES } from '../levels/types';
 import { emptyProgress, update, useStore, type Filter, type LevelProgress } from '../state/store';
 import { DIFF_LABEL, fmtTime } from '../ui/format';
 import { Nav } from '../ui/Nav';
+import { Icon } from '../ui/Icon';
 
 const DEFAULT_FILTER: Filter = { diff: 'all', status: 'all', q: '' };
 
@@ -74,7 +75,7 @@ export function Home() {
           <p>Practise the Amazon bug-fixing round: find the bugs, fix them, pass the hidden tests.</p>
           <div className="cta">
             <a className="btn pri" href={`#/level/${next.id}`}>
-              ▶ {solved ? 'Continue' : 'Start'}: {next.title.split(':')[0]}
+              <Icon name="play" size={14} /> {solved ? 'Continue' : 'Start'}: {next.title.split(':')[0]}
             </a>
             <a className="btn" href="#/guide">
               How to pass
@@ -112,7 +113,7 @@ export function Home() {
             onChange={(e) => setFilter({ q: e.target.value })}
           />
           <button className="btn sm" onClick={randomUnsolved}>
-            🎲 Random
+            <Icon name="shuffle" size={14} /> Random
           </button>
         </div>
 
@@ -129,7 +130,9 @@ function Card({ level: l, progress: st }: { level: LevelSummary; progress: Level
   return (
     <a className="card" href={`#/level/${l.id}`}>
       {st.solved ? (
-        <span className="status ok">✓ {st.best != null ? fmtTime(st.best) : 'solved'}</span>
+        <span className="status ok">
+          <Icon name="check" size={13} /> {st.best != null ? fmtTime(st.best) : 'solved'}
+        </span>
       ) : st.started ? (
         <span className="status wip">in progress</span>
       ) : null}

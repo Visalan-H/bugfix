@@ -1,6 +1,7 @@
 import type { PanelProps } from '../level/contracts';
 import type { TestResult } from '../runner/sandbox/types';
 import { fmtTime, splitWhere } from '../ui/format';
+import { Icon } from '../ui/Icon';
 
 const MAX_LOGS = 40;
 
@@ -19,7 +20,9 @@ function Row({
   return (
     <details className={`tres ${r.pass ? 'p' : 'f'}`} open={!r.pass}>
       <summary>
-        <span className="ic">{r.pass ? '✓' : '✗'}</span>
+        <span className="ic">
+          <Icon name={r.pass ? 'check' : 'x'} size={14} />
+        </span>
         <span className="nm">{name}</span>
         <span className="ms">{r.ms != null ? r.ms + 'ms' : ''}</span>
       </summary>
@@ -50,7 +53,7 @@ export function ResultsTab({ run, progress, interview, setTab, openFile }: Panel
   if (!run)
     return (
       <p className="muted">
-        Nothing run yet. Press <b>▶ Run tests</b> (or ⌘/Ctrl+Enter). Tip: run the tests first and read every failure
+        Nothing run yet. Press <b>Run tests</b> (or ⌘/Ctrl+Enter). Tip: run the tests first and read every failure
         before you change any code.
       </p>
     );
