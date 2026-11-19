@@ -2,3 +2,34 @@
 .pb h2 {
   scroll-margin-top: 72px;
 }
+
+/* Guide sections open and close. */
+.pb-sec {
+  border-bottom: 1px solid var(--line);
+}
+.pb-sec > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 16px 0;
+}
+.pb-sec > summary::-webkit-details-marker {
+  display: none;
+}
+.pb-sec > summary h2 {
+  margin: 0;
+}
+.pb-sec > summary h2::after {
+  content: '+';
+  margin-left: auto;
+  color: var(--fg3);
+  font-family: var(--mono);
+}
+.pb-sec[open] > summary h2::after {
+  content: '−';
+}
+.pb-sec[open] {
+  padding-bottom: 20px;
+}
+.pb-sec > summary:hover h2 {
+  color: var(--acc);
+}
