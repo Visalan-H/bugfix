@@ -22,8 +22,6 @@ interface Props {
   onMount(editor: monaco.editor.IStandaloneCodeEditor): void;
 }
 
-const KEYS = '⌘/Ctrl+Enter run · Alt+W close tab · Alt+[ ] switch tab · Alt+\\ split · Ctrl+` console';
-
 /** One editor side: its tabs, the file path bar, and a Monaco editor. */
 export function EditorPane(p: Props) {
   const f = p.pane.active;
@@ -52,7 +50,7 @@ export function EditorPane(p: Props) {
       onFocusCapture={p.onFocus}
     >
       <div className="etabs">
-        <div className="etab-list">
+        <div className="etab-list" title="Alt+W close tab · Alt+[ and Alt+] switch tab">
           {p.pane.tabs.map((t) => {
             const dir = t.includes('/') ? t.split('/').slice(-2, -1)[0] + '/' : '';
             const changed = p.files[t] !== p.original[t];
@@ -96,11 +94,6 @@ export function EditorPane(p: Props) {
             ✕
           </button>
         )}
-      </div>
-      <div className="filebar">
-        <span className="fpath">{f}</span>
-        {ro && <span className="ro">read-only</span>}
-        {p.paneCount === 1 && <span className="kb">{KEYS}</span>}
       </div>
       <div className="monaco-host">
         <Editor

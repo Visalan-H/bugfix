@@ -1,7 +1,7 @@
 import { esc } from './format';
 
 // A small Markdown renderer for tickets, hints and answers (same rules as the
-// prototype). Output is HTML with all input escaped, safe for dangerouslySetInnerHTML.
+// old site). Output is HTML with all input escaped, safe for dangerouslySetInnerHTML.
 
 /** Inline bits: `code`, **bold**, [links](https://…). */
 export function inline(s: string): string {
