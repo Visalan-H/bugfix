@@ -88,17 +88,11 @@ export function Console(p: Props) {
   if (!groups) {
     body = (
       <div className="con-empty">
-        Put <code>console.log(...)</code> anywhere in <code>src/</code> and press <b>▶ Run tests</b>. Everything you log
-        shows up here, with the file and line it came from. Click the file name to jump there.
+        <code>console.log</code> output shows here after a run.
       </div>
     );
   } else if (!groups.length) {
-    body = (
-      <div className="con-empty">
-        This run printed nothing. Tip: log the value you suspect, for example{' '}
-        <code>console.log('user is', req.user)</code>, then run again.
-      </div>
-    );
+    body = <div className="con-empty">Nothing logged.</div>;
   } else {
     const shown = groups
       .map((g) => ({
