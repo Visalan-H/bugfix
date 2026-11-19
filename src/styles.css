@@ -204,29 +204,6 @@ code {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.facts {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin: 34px 0 8px;
-}
-.fact {
-  background: var(--bg2);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: 14px;
-}
-.fact b {
-  display: block;
-  font-family: var(--mono);
-  font-size: 20px;
-  color: var(--fg);
-  margin-bottom: 2px;
-}
-.fact span {
-  font-size: 13px;
-  color: var(--fg2);
-}
 .sec-h {
   display: flex;
   align-items: baseline;
@@ -237,12 +214,6 @@ code {
   margin: 0;
   font-size: 22px;
   letter-spacing: -0.02em;
-}
-.stackbar {
-  display: flex;
-  gap: 8px;
-  margin: 0 0 18px;
-  flex-wrap: wrap;
 }
 .chip {
   font-family: var(--mono);
@@ -256,9 +227,6 @@ code {
 .chip.on {
   border-color: var(--acc);
   color: var(--acc);
-}
-.chip.soon {
-  opacity: 0.55;
 }
 .grid {
   display: grid;
@@ -283,7 +251,7 @@ code {
   text-decoration: none;
 }
 .card h3 {
-  margin: 8px 0 6px;
+  margin: 0 0 6px;
   font-size: 17px;
   letter-spacing: -0.01em;
 }
@@ -291,6 +259,10 @@ code {
   margin: 0 0 12px;
   color: var(--fg2);
   font-size: 14px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .card .meta {
   display: flex;
@@ -299,21 +271,6 @@ code {
   font-size: 12px;
   color: var(--fg3);
   flex-wrap: wrap;
-}
-.tags {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.tag {
-  font-size: 11.5px;
-  font-family: var(--mono);
-  color: var(--fg2);
-  background: var(--bg3);
-  border: 1px solid var(--line);
-  padding: 2px 7px;
-  border-radius: 5px;
 }
 .pill {
   font-family: var(--mono);
@@ -335,6 +292,9 @@ code {
 .pill.hard {
   color: var(--hard);
   background: rgba(255, 93, 115, 0.1);
+}
+.status + h3 {
+  padding-right: 90px;
 }
 .status {
   position: absolute;
@@ -399,25 +359,6 @@ footer {
 }
 .pb li {
   margin: 4px 0;
-}
-.toc {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 18px 0 0;
-}
-.toc a {
-  font-size: 13px;
-  font-family: var(--mono);
-  padding: 5px 10px;
-  border: 1px solid var(--line2);
-  border-radius: 6px;
-  color: var(--fg2);
-}
-.toc a:hover {
-  color: var(--fg);
-  text-decoration: none;
-  border-color: var(--fg3);
 }
 .timeline {
   display: flex;
@@ -723,29 +664,6 @@ body.in-level {
 .code {
   background: var(--bg);
 }
-.filebar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 14px;
-  border-bottom: 1px solid var(--line);
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--fg2);
-  background: var(--bg2);
-}
-.filebar .ro {
-  font-size: 11px;
-  color: var(--fg3);
-  border: 1px solid var(--line2);
-  border-radius: 4px;
-  padding: 0 5px;
-}
-.filebar .kb {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--fg3);
-}
 .editor {
   flex: 1;
   display: flex;
@@ -924,21 +842,6 @@ details.coach summary {
   font-weight: 600;
   font-size: 14px;
   color: var(--acc2);
-}
-.split {
-  display: flex;
-  border-radius: 8px;
-  overflow: hidden;
-  margin: 8px 0;
-  font-size: 11.5px;
-  font-family: var(--mono);
-}
-.split div {
-  padding: 6px 8px;
-  color: #111;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .sumbar {
   display: flex;
@@ -1233,9 +1136,6 @@ details.coach summary {
   }
 }
 @media (max-width: 900px) {
-  .facts {
-    grid-template-columns: 1fr 1fr;
-  }
   .loop {
     grid-template-columns: 1fr;
   }
@@ -1312,11 +1212,6 @@ details.coach summary {
   font-size: inherit;
   font-family: inherit;
 }
-@media (max-width: 900px) {
-  .filebar .kb {
-    display: none;
-  }
-}
 .filters {
   display: flex;
   flex-wrap: wrap;
@@ -1389,10 +1284,6 @@ body {
   font-size: 15px;
   line-height: 1.55;
 }
-.fact span {
-  font-size: 14px;
-  line-height: 1.5;
-}
 .pb p,
 .pb li {
   font-size: 16px;
@@ -1463,9 +1354,6 @@ th,
 td {
   font-size: 14.5px;
   line-height: 1.55;
-}
-.tag {
-  font-size: 12px;
 }
 
 /* ---------- editor tabs + split ---------- */
@@ -1593,16 +1481,6 @@ td {
 .eb:hover {
   color: var(--fg);
   background: var(--bg3);
-}
-.filebar .fpath {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.filebar .kb {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .lineflash {
   position: absolute;
@@ -1870,9 +1748,6 @@ td {
 .lv-body.nofiles .files,
 .lv-body.nopanel .panel {
   display: none;
-}
-.filebar .ro {
-  white-space: nowrap;
 }
 @media (max-width: 1100px) {
   .lv-body.nofiles {
