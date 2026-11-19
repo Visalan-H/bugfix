@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Files } from '../runner/sandbox/types';
 
-// Saved progress. Same localStorage key and shape as the prototype, so old
+// Saved progress. Same localStorage key and shape as the old site, so old
 // progress still loads.
 export const STORAGE_KEY = 'bugdrill:v1';
 

@@ -365,7 +365,6 @@ function Level({ level }: { level: LoadedLevel }) {
       <div className={`lv-body ${hideFiles ? 'nofiles' : ''} ${hidePanel ? 'nopanel' : ''}`}>
         <aside className={`pane files ${mobilePane === 'files' ? 'show' : ''}`}>
           <FileTree
-            levelId={id}
             original={original}
             files={files}
             active={curFile}

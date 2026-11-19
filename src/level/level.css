@@ -1,4 +1,4 @@
-/* Level page additions on top of the prototype styles (src/styles.css). */
+/* Level page additions on top of the shared styles (src/styles.css). */
 
 .lv-loading {
   padding: 40px 22px;
@@ -38,12 +38,6 @@
 }
 
 /* Keep the file path whole; the shortcut hint shrinks instead. */
-.filebar .fpath {
-  flex: none;
-}
-.filebar .kb {
-  min-width: 0;
-}
 
 .con-src {
   cursor: pointer;

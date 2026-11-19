@@ -2,7 +2,6 @@ import type { Files } from '../runner/sandbox/types';
 import { isReadOnly, sortPaths } from './files';
 
 interface Props {
-  levelId: string;
   original: Files;
   files: Files;
   active: string;
@@ -11,7 +10,7 @@ interface Props {
 }
 
 /** The level's files. Folders first; changed files get a dot. */
-export function FileTree({ levelId, original, files, active, openTabs, onOpen }: Props) {
+export function FileTree({ original, files, active, openTabs, onOpen }: Props) {
   const rows: React.ReactNode[] = [];
   const seen = new Set<string>();
   for (const p of sortPaths(Object.keys(original))) {
@@ -38,16 +37,16 @@ export function FileTree({ levelId, original, files, active, openTabs, onOpen }:
         {changed ? (
           <span className="mod" title="changed" />
         ) : isReadOnly(p) ? (
-          <span className="ro">read-only</span>
+          <span className="ro" title="read-only">
+            🔒
+          </span>
         ) : null}
       </div>,
     );
   }
   return (
     <>
-      <div className="ph">
-        {levelId.toUpperCase()} · files <span className="dim">(click to open in a tab)</span>
-      </div>
+      <div className="ph">Files</div>
       {rows}
     </>
   );
