@@ -15,6 +15,7 @@ import { FileTree } from './FileTree';
 import { defaultFile, firstTestFile } from './files';
 import { TimerDisplay, useTimer } from './timer';
 import './level.css';
+import { Icon } from '../ui/Icon';
 
 type MobilePane = 'files' | 'code' | 'panel';
 type Ed = monaco.editor.IStandaloneCodeEditor;
@@ -305,33 +306,43 @@ function Level({ level }: { level: LoadedLevel }) {
   return (
     <div className="lv">
       <header className="lv-top">
-        <a className="back" href="#/" title="All levels">
-          ←
+        <a className="back" href="#/" title="All levels" aria-label="All levels">
+          <Icon name="arrowLeft" size={18} />
         </a>
         <button
           className="tb opt ic"
           title="Show or hide the file list"
           onClick={() => update({ hideFiles: !hideFiles })}
         >
-          ☰
+          <Icon name="sidebarLeft" />
         </button>
         <div className="lv-title">
           <span className={`pill ${level.difficulty}`}>{DIFF_LABEL[level.difficulty]}</span>
           <b>{level.title}</b>
         </div>
         <TimerDisplay minutes={level.minutes} elapsedMs={timer.elapsedMs} running={timer.running} />
-        <button className="tb" onClick={timer.toggle}>
-          {timer.running ? 'Pause' : timer.hasTime() ? 'Resume' : 'Start'}
+        <button
+          className="tb ic"
+          title={timer.running ? 'Pause the clock' : 'Start the clock'}
+          aria-label={timer.running ? 'Pause' : timer.hasTime() ? 'Resume' : 'Start'}
+          onClick={timer.toggle}
+        >
+          <Icon name={timer.running ? 'pause' : 'play'} />
         </button>
         <div className="sp" />
-        <button className="tb opt" title="See every line you changed" onClick={() => setShowDiff(true)}>
-          Diff
+        <button
+          className="tb opt ic"
+          title="Your changes (diff)"
+          aria-label="Your changes"
+          onClick={() => setShowDiff(true)}
+        >
+          <Icon name="diff" />
         </button>
-        <button className="tb opt" title="Undo all changes to the file you're looking at" onClick={resetFile}>
-          Reset file
+        <button className="tb opt ic" title="Reset this file" aria-label="Reset this file" onClick={resetFile}>
+          <Icon name="undo" />
         </button>
         <button className="tb run" title="Ctrl/⌘ + Enter" disabled={running} onClick={() => runTests(false)}>
-          ▶ Run tests
+          <Icon name="play" size={14} /> Run tests
         </button>
         <button
           className="tb sub"
@@ -346,7 +357,7 @@ function Level({ level }: { level: LoadedLevel }) {
           title="Show or hide the Task and Results panel"
           onClick={() => update({ hidePanel: !hidePanel })}
         >
-          ◨
+          <Icon name="sidebarRight" />
         </button>
       </header>
       <nav className="mtabs">

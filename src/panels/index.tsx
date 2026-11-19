@@ -4,6 +4,7 @@ import { HintsTab } from './HintsTab';
 import { NotesTab } from './NotesTab';
 import { ResultsTab } from './ResultsTab';
 import { TaskTab } from './TaskTab';
+import { Icon } from '../ui/Icon';
 
 export { DiffModal } from './DiffModal';
 
@@ -39,7 +40,7 @@ export function SidePanel(props: PanelProps) {
                 {passed}/{all.length}
               </span>
             )}
-            {k === 'debrief' && locked ? ' 🔒' : ''}
+            {k === 'debrief' && locked && <Icon name="lock" size={12} title="locked" />}
           </button>
         ))}
       </div>

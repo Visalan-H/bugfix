@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import type { Files, LogEntry, TestResult } from '../runner/sandbox/types';
 import { splitWhere } from '../ui/format';
 import type { RunState } from './contracts';
+import { Icon } from '../ui/Icon';
 
 interface Group {
   key: string;
@@ -106,7 +107,9 @@ export function Console(p: Props) {
       shown.map(({ g, lines }) => (
         <div key={g.key}>
           <div className={`con-grp ${g.pass ? 'p' : 'f'}`}>
-            <span className="ic">{g.pass ? '✓' : '✗'}</span>
+            <span className="ic">
+              <Icon name={g.pass ? 'check' : 'x'} size={13} />
+            </span>
             {g.hidden && <span className="hid">hidden</span>}
             {g.name}
           </div>
@@ -136,7 +139,10 @@ export function Console(p: Props) {
       <div className="con-resize" title="Drag to resize" onPointerDown={startResize} />
       <div className="con-head">
         <button className="con-title" title="Show or hide (Ctrl+`)" onClick={() => p.onToggle()}>
-          <span className="chev">{p.open ? '▾' : '▸'}</span> Console
+          <span className="chev">
+            <Icon name={p.open ? 'chevronDown' : 'chevronRight'} size={14} />
+          </span>{' '}
+          Console
         </button>
         <span className={`con-badge ${all.length ? 'has' : ''}`}>
           {all.length} {all.length === 1 ? 'line' : 'lines'}

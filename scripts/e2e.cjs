@@ -182,7 +182,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   ok('infinite loop: page stayed responsive', ticks >= 5, `ticks=${ticks}, took ${Date.now() - t0}ms`);
 
   // ---- diff modal + reset all
-  await p.click('button.tb.opt:has-text("Diff")');
+  await p.click('button[aria-label="Your changes"]');
   ok('diff popup lists the change', (await p.innerText('.modal')).includes('while (true) {}'));
   const ra = p.locator('.modal .mf button').first();
   await ra.click();
@@ -226,7 +226,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   );
   ok(
     'Answers unlocked after solving',
-    !(await p.locator('.ptabs button', { hasText: 'Answers' }).innerText()).includes('🔒'),
+    (await p.locator('.ptabs button', { hasText: 'Answers' }).locator('.i-lock').count()) === 0,
   );
   const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('bugdrill:v1')).levels.e5);
   ok(
