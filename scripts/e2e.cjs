@@ -36,7 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     } catch {}
   });
 
-  // ---- old progress from the prototype loads
+  // ---- old progress from the old site loads
   const e2app = 'src/app.js';
   await p.goto(BASE);
   await p.evaluate(
