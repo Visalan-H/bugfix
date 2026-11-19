@@ -22,7 +22,6 @@ export function Home() {
     const st = ls(l.id);
     if (f.diff !== 'all' && l.difficulty !== f.diff) return false;
     if (f.status === 'unsolved' && st.solved) return false;
-    if (f.status === 'solved' && !st.solved) return false;
     if (q) {
       const hay = [l.title, l.tagline, ...l.tags, ...l.bugs.map((b) => b.pattern)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
@@ -69,39 +68,17 @@ export function Home() {
       <Nav active="home" />
       <div className="wrap">
         <section className="hero">
-          <div className="eyebrow">Amazon online test · bug-fixing round</div>
           <h1>
             Someone else's code. Failing tests. <em>A clock.</em>
           </h1>
-          <p>
-            Practise the Amazon bug-fixing round on small, real-looking Node apps. Read the task, find the bugs, fix
-            them, then submit to run hidden tests too.
-          </p>
+          <p>Practise the Amazon bug-fixing round: find the bugs, fix them, pass the hidden tests.</p>
           <div className="cta">
             <a className="btn pri" href={`#/level/${next.id}`}>
               ▶ {solved ? 'Continue' : 'Start'}: {next.title.split(':')[0]}
             </a>
             <a className="btn" href="#/guide">
-              How to pass (8 min read)
+              How to pass
             </a>
-          </div>
-          <div className="facts">
-            <div className="fact">
-              <b>2 questions</b>
-              <span>One coding puzzle and one bug-fixing task in an existing app</span>
-            </div>
-            <div className="fact">
-              <b>~60 min</b>
-              <span>Usual time for the bug task. Your invite has the real number.</span>
-            </div>
-            <div className="fact">
-              <b>3 – 6 bugs</b>
-              <span>People report between 3 bugs and about 6 failing tests</span>
-            </div>
-            <div className="fact">
-              <b>Hidden tests</b>
-              <span>Passing the tests you can see is not enough</span>
-            </div>
           </div>
         </section>
 
@@ -114,12 +91,6 @@ export function Home() {
             {solved}/{LEVELS.length} solved
           </span>
         </div>
-        <div className="stackbar">
-          <span className="chip on">Node.js · Express · Mongo-style</span>
-          <span className="chip soon" title="Same bugs in Java. See the table in the Guide.">
-            Spring Boot · next
-          </span>
-        </div>
 
         <div className="filters">
           {chip('diff', 'all', 'All')}
@@ -127,28 +98,28 @@ export function Home() {
           {chip('diff', 'medium', 'Medium')}
           {chip('diff', 'hard', 'Hard')}
           <span className="fsep" />
-          {chip('status', 'all', 'Any status')}
-          {chip('status', 'unsolved', 'Unsolved')}
-          {chip('status', 'solved', 'Solved')}
+          <button
+            className={`chip ${f.status === 'unsolved' ? 'on' : ''}`}
+            onClick={() => setFilter({ status: f.status === 'unsolved' ? 'all' : 'unsolved' })}
+          >
+            Hide solved
+          </button>
           <input
             className="fsearch"
-            placeholder="Search: await, cache, date, owner…"
+            placeholder="Search…"
             aria-label="Search levels"
             value={f.q}
             onChange={(e) => setFilter({ q: e.target.value })}
           />
           <button className="btn sm" onClick={randomUnsolved}>
-            🎲 Random unsolved
+            🎲 Random
           </button>
         </div>
 
         <div id="groups">
           {groups.length ? groups : <p className="muted">No levels match. Try clearing the filters.</p>}
         </div>
-        <footer>
-          Runs entirely in your browser: a mini Express, supertest, Jest and a Mongoose-like store. Progress is saved in
-          this browser only.
-        </footer>
+        <footer>Everything runs in your browser. Progress is saved here only.</footer>
       </div>
     </>
   );
@@ -162,20 +133,11 @@ function Card({ level: l, progress: st }: { level: LevelSummary; progress: Level
       ) : st.started ? (
         <span className="status wip">in progress</span>
       ) : null}
-      <span className={`pill ${l.difficulty}`}>{DIFF_LABEL[l.difficulty]}</span>
       <h3>{l.title}</h3>
       <p>{l.tagline}</p>
-      <div className="tags">
-        {l.tags.map((t) => (
-          <span key={t} className="tag">
-            {t}
-          </span>
-        ))}
-      </div>
       <div className="meta">
-        <span>⏱ {l.minutes} min</span>
-        <span>🐞 {l.bugs.length} bugs</span>
-        <span>📁 {l.fileCount} files</span>
+        <span>{l.minutes} min</span>
+        <span>{l.bugs.length} bugs</span>
       </div>
     </a>
   );
