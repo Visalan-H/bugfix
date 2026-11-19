@@ -1,5 +1,6 @@
 import type { Files } from '../runner/sandbox/types';
 import { isReadOnly, sortPaths } from './files';
+import { Icon } from '../ui/Icon';
 
 interface Props {
   original: Files;
@@ -21,7 +22,7 @@ export function FileTree({ original, files, active, openTabs, onOpen }: Props) {
       seen.add(dir);
       rows.push(
         <div key={'d:' + dir} className="fi dir" style={{ paddingLeft: 10 + (d - 1) * 14 }}>
-          ▾ {parts[d - 1]}/
+          <Icon name="chevronDown" size={12} /> {parts[d - 1]}
         </div>,
       );
     }
@@ -37,8 +38,8 @@ export function FileTree({ original, files, active, openTabs, onOpen }: Props) {
         {changed ? (
           <span className="mod" title="changed" />
         ) : isReadOnly(p) ? (
-          <span className="ro" title="read-only">
-            🔒
+          <span className="ro">
+            <Icon name="lock" size={12} title="read-only" />
           </span>
         ) : null}
       </div>,

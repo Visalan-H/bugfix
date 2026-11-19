@@ -5,6 +5,7 @@ import type { Files } from '../runner/sandbox/types';
 import type { PaneLayout } from '../state/store';
 import { isReadOnly } from './files';
 import { isTestFile } from '../levels/types';
+import { Icon } from '../ui/Icon';
 
 interface Props {
   index: number;
@@ -69,7 +70,11 @@ export function EditorPane(p: Props) {
               >
                 <span className="tdir">{dir}</span>
                 <span className="tname">{t.split('/').pop()}</span>
-                {isReadOnly(t) && <span className="tlock">ro</span>}
+                {isReadOnly(t) && (
+                  <span className="tlock">
+                    <Icon name="lock" size={12} title="read-only" />
+                  </span>
+                )}
                 <span
                   className={`x ${changed ? 'mod' : ''}`}
                   title="Close (Alt+W)"
@@ -78,7 +83,7 @@ export function EditorPane(p: Props) {
                     p.onClose(t);
                   }}
                 >
-                  ×
+                  <Icon name="x" size={12} />
                 </span>
               </div>
             );
@@ -86,12 +91,12 @@ export function EditorPane(p: Props) {
         </div>
         {p.canSplit && p.paneCount === 1 && (
           <button className="eb" title="Show two files side by side (Alt+\)" onClick={p.onSplit}>
-            ⫿ Split
+            <Icon name="columns" size={14} />
           </button>
         )}
         {p.paneCount > 1 && (
           <button className="eb" title="Close this side" onClick={p.onClosePane}>
-            ✕
+            <Icon name="x" size={14} />
           </button>
         )}
       </div>

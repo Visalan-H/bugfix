@@ -658,7 +658,7 @@ body.in-level {
 }
 .fi .ro {
   margin-left: auto;
-  font-size: 10px;
+  display: inline-flex;
   color: var(--fg3);
 }
 .code {
@@ -1434,11 +1434,8 @@ td {
   color: #9fd3ff;
 }
 .etab .tlock {
-  font-size: 10px;
+  display: inline-flex;
   color: var(--fg3);
-  border: 1px solid var(--line2);
-  border-radius: 3px;
-  padding: 0 3px;
 }
 .etab .x {
   width: 20px;
@@ -1802,4 +1799,32 @@ td {
   margin-left: 8px;
   color: #ffcf7a;
   text-decoration-color: rgba(255, 207, 122, 0.4);
+}
+
+/* Line icons (src/ui/Icon.tsx) */
+.icon {
+  display: inline-block;
+  vertical-align: -0.15em;
+  flex-shrink: 0;
+}
+.tb,
+.btn,
+.eb,
+.back,
+.con-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fi.dir .icon {
+  opacity: 0.6;
+  margin-right: 2px;
+}
+.tlock,
+.fi .ro,
+.ptabs .i-lock {
+  opacity: 0.6;
+}
+.ptabs .i-lock {
+  margin-left: 4px;
 }
