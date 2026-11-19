@@ -38,12 +38,6 @@
 }
 
 /* Keep the file path whole; the shortcut hint shrinks instead. */
-.filebar .fpath {
-  flex: none;
-}
-.filebar .kb {
-  min-width: 0;
-}
 
 .con-src {
   cursor: pointer;
