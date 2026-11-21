@@ -36,7 +36,9 @@ export function InterviewToggle({ on, onClick }: { on: boolean; onClick: () => v
       onClick={onClick}
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onClick())}
     >
-      <span className="lbl">Interview mode</span>
+      <span className="lbl">
+        Interview<span className="lbl-long"> mode</span>
+      </span>
       <span className="sw" />
     </div>
   );

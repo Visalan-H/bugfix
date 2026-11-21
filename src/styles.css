@@ -260,7 +260,7 @@ code {
   color: var(--fg2);
   font-size: 14px;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -310,16 +310,20 @@ code {
   color: var(--acc2);
 }
 .progress {
-  height: 6px;
+  height: 8px;
   background: var(--bg3);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
-  width: 160px;
+  width: 200px;
+  display: flex;
 }
 .progress i {
   display: block;
   height: 100%;
   background: var(--ok);
+}
+.progress i.wip {
+  background: var(--acc2);
 }
 footer {
   padding: 50px 0 40px;
@@ -1147,6 +1151,9 @@ details.coach summary {
     padding: 10px 14px;
   }
   .nav .toggle .lbl {
+    font-size: 12px;
+  }
+  .nav .toggle .lbl-long {
     display: none;
   }
   .lv-top {
