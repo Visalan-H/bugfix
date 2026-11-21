@@ -2,7 +2,7 @@
   "id": "e13",
   "stack": "node",
   "difficulty": "easy",
-  "title": "Request validation gone wrong",
+  "title": "Profile form checks",
   "minutes": 15,
   "tagline": "Age 0 is rejected, every list of tags is rejected, and 'hello a@b.co' passes as an email.",
   "tags": [

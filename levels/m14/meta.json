@@ -4,7 +4,7 @@
   "difficulty": "medium",
   "title": "Polls & voting",
   "minutes": 25,
-  "tagline": "A typo in a field name allows unlimited votes, percentages round down, closed polls stay open, and you can vote for anything.",
+  "tagline": "The same person can vote many times, percentages don't add up, and closed polls still take votes.",
   "tags": [
     "field-name typos",
     "rounding",

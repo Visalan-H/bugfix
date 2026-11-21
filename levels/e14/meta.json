@@ -4,7 +4,7 @@
   "difficulty": "easy",
   "title": "Game leaderboard",
   "minutes": 15,
-  "tagline": "New players score NaN, ranks start at 0, and 'top 3' is just the first 3 who joined.",
+  "tagline": "New players have no score, ranks start at 0, and the top list shows the wrong players.",
   "tags": [
     "NaN",
     "ranking",

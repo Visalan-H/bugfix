@@ -4,7 +4,7 @@
   "difficulty": "medium",
   "title": "Webhook retries & signatures",
   "minutes": 30,
-  "tagline": "`^` isn't 'power of', the limit uses Math.max, retries stop one try late, and capital-letter signatures fail.",
+  "tagline": "Retry delays start too high, every delay hits the cap, and failed deliveries stay pending.",
   "tags": [
     "XOR vs **",
     "min/max",

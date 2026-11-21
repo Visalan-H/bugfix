@@ -4,7 +4,7 @@
   "difficulty": "easy",
   "title": "Shipping fee calculator",
   "minutes": 15,
-  "tagline": "A switch with a missing break, rounding the wrong way, and a free-shipping limit off by one rupee.",
+  "tagline": "Local orders pay the regional fee, light parcels are overcharged, and a ₹499 order still pays shipping.",
   "tags": [
     "switch fallthrough",
     "rounding",

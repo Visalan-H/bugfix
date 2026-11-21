@@ -2,9 +2,9 @@
   "id": "h4",
   "stack": "node",
   "difficulty": "hard",
-  "title": "API rate limiter middleware",
+  "title": "API rate limiter",
   "minutes": 40,
-  "tagline": "A rate limiter that never limits, puts every client in one bucket, and says 'wait 40,000 seconds'.",
+  "tagline": "A rate limiter that never limits, blocks every client at once, and says 'wait 40,000 seconds'.",
   "tags": [
     "middleware",
     "header casing",

@@ -2,9 +2,9 @@
   "id": "e1",
   "stack": "node",
   "difficulty": "easy",
-  "title": "Todo API: the classic three",
+  "title": "Todo API",
   "minutes": 15,
-  "tagline": "Three classic mistakes: a missing await, a missing return, and a text value treated like true/false.",
+  "tagline": "New todos come back empty, a blank title crashes the server, and the done filter shows nothing.",
   "tags": [
     "async/await",
     "response flow",

@@ -4,7 +4,7 @@
   "difficulty": "medium",
   "title": "Movie DB watch list",
   "minutes": 30,
-  "tagline": "Based on a real Amazon test: duplicates get in, removed movies come back, and errors keep running.",
+  "tagline": "Based on a real Amazon test: duplicates get in, unknown movies get added, and removed movies come back.",
   "tags": [
     "object identity",
     "check order",

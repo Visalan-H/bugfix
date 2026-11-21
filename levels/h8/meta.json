@@ -4,7 +4,7 @@
   "difficulty": "hard",
   "title": "Product filters & paging",
   "minutes": 40,
-  "tagline": "The max price wipes out the min price, the total counts only one page, brand needs exact capitals, and page 0 shows the last page.",
+  "tagline": "Max price wipes out min price, the total counts only one page, and brand search needs exact capitals.",
   "tags": [
     "query building",
     "totals",

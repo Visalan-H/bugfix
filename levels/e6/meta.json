@@ -4,7 +4,7 @@
   "difficulty": "easy",
   "title": "Employee directory search",
   "minutes": 15,
-  "tagline": "Search crashes without a query, matches too much, can't sort names, and breaks on a big limit.",
+  "tagline": "Search crashes without a query, matches too much, isn't in order, and fails on a big limit.",
   "tags": [
     "optional params",
     "string matching",

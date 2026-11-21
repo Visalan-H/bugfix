@@ -4,7 +4,7 @@
   "difficulty": "hard",
   "title": "Referral rewards",
   "minutes": 40,
-  "tagline": "Signups at the same time go past the reward limit, lowercase codes fail, failed signups still pay rewards, and a bad code blocks signup.",
+  "tagline": "Signups at the same time go past the reward limit, failed signups still pay rewards, and lowercase codes fail.",
   "tags": [
     "concurrency caps",
     "ordering side effects",

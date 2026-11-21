@@ -4,7 +4,7 @@
   "difficulty": "hard",
   "title": "Wallet ledger & refunds",
   "minutes": 40,
-  "tagline": "Payments ADD to the balance, retries add money twice, refunds can be bigger than the payment, and you can spend money you don't have.",
+  "tagline": "Payments raise the balance, retried top-ups pay twice, and refunds can be bigger than the payment.",
   "tags": [
     "ledgers",
     "idempotency scope",
