@@ -39,7 +39,8 @@ for (const level of levels) {
   const secretTexts = [
     secrets.hidden,
     ...Object.values(secrets.solution),
-    ...secrets.bugs.flatMap((b) => [...b.hints, b.cause, b.fix]),
+    ...secrets.lookFor,
+    ...secrets.bugs.flatMap((b) => [...b.hints, b.cause, b.fix, b.pattern, b.symptom]),
   ];
   const found = new Set<string>();
   for (const t of secretTexts)

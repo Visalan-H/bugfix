@@ -6,25 +6,27 @@ import type { Bug, Level, LevelMeta } from './types';
 // finds an answer by searching the site's code. This is not real security:
 // someone set on cheating can still unscramble it.
 
-/** Bug fields that give the answer away. */
-export type BugSecret = Pick<Bug, 'file' | 'hints' | 'cause' | 'fix'>;
-export type PublicBug = Omit<Bug, keyof BugSecret>;
-
-export interface PublicMeta extends Omit<LevelMeta, 'bugs'> {
-  bugs: PublicBug[];
+/**
+ * What anyone can see before opening a level: no bug names, tips, tags or
+ * hidden-test symptoms, only how many bugs there are.
+ */
+export interface PublicMeta extends Omit<LevelMeta, 'bugs' | 'tags' | 'lookFor'> {
+  bugCount: number;
 }
 
 export interface LevelSecrets {
   hidden: string;
   solution: Files;
-  bugs: BugSecret[];
+  bugs: Bug[];
+  tags: string[];
+  lookFor: string[];
 }
 
 export function splitLevel(L: Level): { meta: PublicMeta; secrets: LevelSecrets } {
-  const { ticket: _t, files: _f, hidden, solution, bugs, ...rest } = L;
+  const { ticket: _t, files: _f, hidden, solution, bugs, tags, lookFor, ...rest } = L;
   return {
-    meta: { ...rest, bugs: bugs.map(({ symptom, pattern }) => ({ symptom, pattern })) },
-    secrets: { hidden, solution, bugs: bugs.map(({ file, hints, cause, fix }) => ({ file, hints, cause, fix })) },
+    meta: { ...rest, bugCount: bugs.length },
+    secrets: { hidden, solution, bugs, tags, lookFor },
   };
 }
 

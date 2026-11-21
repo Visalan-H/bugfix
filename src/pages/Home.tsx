@@ -24,7 +24,7 @@ export function Home() {
     if (f.diff !== 'all' && l.difficulty !== f.diff) return false;
     if (f.status === 'unsolved' && st.solved) return false;
     if (q) {
-      const hay = [l.title, l.tagline, ...l.tags, ...l.bugs.map((b) => b.pattern)].join(' ').toLowerCase();
+      const hay = [l.title, l.tagline].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -140,7 +140,7 @@ function Card({ level: l, progress: st }: { level: LevelSummary; progress: Level
       <p>{l.tagline}</p>
       <div className="meta">
         <span>{l.minutes} min</span>
-        <span>{l.bugs.length} bugs</span>
+        <span>{l.bugCount} bugs</span>
       </div>
     </a>
   );
