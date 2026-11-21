@@ -5,17 +5,31 @@ import { emptyProgress, update, useStore, type Filter, type LevelProgress } from
 import { DIFF_LABEL, fmtTime } from '../ui/format';
 import { Nav } from '../ui/Nav';
 import { Icon } from '../ui/Icon';
+import './pages.css';
 
 const DEFAULT_FILTER: Filter = { diff: 'all', status: 'all', q: '' };
+
+// "Based on a real Amazon test: …" becomes a badge, so the card text is about the app.
+const REAL = /^Based on a real Amazon test[^:]*:\s*/;
+const summary = (l: LevelSummary) => {
+  const t = l.tagline.replace(REAL, '');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
 
 /** Home: intro, filters and every level grouped by difficulty. */
 export function Home() {
   const progress = useStore((s) => s.levels);
   const f = useStore((s) => s.filter) ?? DEFAULT_FILTER;
+  const interview = useStore((s) => s.interview);
+  const lastId = useStore((s) => s.lastLevel);
   const ls = (id: string): LevelProgress => progress[id] ?? emptyProgress();
 
   const solved = LEVELS.filter((l) => ls(l.id).solved).length;
-  const next = LEVELS.find((l) => !ls(l.id).solved) ?? LEVELS[0];
+  const working = LEVELS.filter((l) => ls(l.id).started && !ls(l.id).solved).length;
+  // Continue the level you were on; otherwise the first one you haven't solved.
+  const last = LEVELS.find((l) => l.id === lastId && !ls(l.id).solved);
+  const next = last ?? LEVELS.find((l) => !ls(l.id).solved) ?? LEVELS[0];
+  const ctaVerb = last ? 'Continue' : solved ? 'Next' : 'Start';
   const setFilter = (patch: Partial<Filter>) => update({ filter: { ...f, ...patch } });
 
   const q = f.q.trim().toLowerCase();
@@ -24,8 +38,8 @@ export function Home() {
     if (f.diff !== 'all' && l.difficulty !== f.diff) return false;
     if (f.status === 'unsolved' && st.solved) return false;
     if (q) {
-      const hay = [l.title, l.tagline, ...l.tags, ...l.bugs.map((b) => b.pattern)].join(' ').toLowerCase();
-      if (!hay.includes(q)) return false;
+      const hay = [l.title, l.tagline].join(' ').toLowerCase();
+      if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
     }
     return true;
   };
@@ -69,13 +83,13 @@ export function Home() {
       <Nav active="home" />
       <div className="wrap">
         <section className="hero">
-          <h1>
+          <h1 className="balance">
             Someone else's code. Failing tests. <em>A clock.</em>
           </h1>
           <p>Practise the Amazon bug-fixing round: find the bugs, fix them, pass the hidden tests.</p>
           <div className="cta">
             <a className="btn pri" href={`#/level/${next.id}`}>
-              <Icon name="play" size={14} /> {solved ? 'Continue' : 'Start'}: {next.title.split(':')[0]}
+              <Icon name="play" size={14} /> {ctaVerb}: {next.title.split(':')[0]}
             </a>
             <a className="btn" href="#/guide">
               How to pass
@@ -83,13 +97,23 @@ export function Home() {
           </div>
         </section>
 
+        {interview && (
+          <div className="banner warn mode-note">
+            <b>Interview mode is on.</b> No hints or tips until you pass, like the real test.{' '}
+            <button className="linkish" onClick={() => update({ interview: false })}>
+              Turn off
+            </button>
+          </div>
+        )}
+
         <div className="sec-h">
           <h2>Levels</h2>
-          <div className="progress" title={`${solved}/${LEVELS.length} solved`}>
+          <div className="progress" title={`${solved} solved, ${working} in progress`}>
             <i style={{ width: `${(solved / LEVELS.length) * 100}%` }} />
+            <i className="wip" style={{ width: `${(working / LEVELS.length) * 100}%` }} />
           </div>
           <span className="dim mono" style={{ fontSize: 12 }}>
-            {solved}/{LEVELS.length} solved
+            {solved}/{LEVELS.length} solved{working ? ` · ${working} in progress` : ''}
           </span>
         </div>
 
@@ -118,9 +142,21 @@ export function Home() {
         </div>
 
         <div id="groups">
-          {groups.length ? groups : <p className="muted">No levels match. Try clearing the filters.</p>}
+          {groups.length ? (
+            groups
+          ) : (
+            <div className="empty">
+              <p>
+                No levels match{q ? <> “{f.q.trim()}”</> : ' these filters'}. Search looks at level names and what goes
+                wrong in them.
+              </p>
+              <button className="btn sm" onClick={() => update({ filter: DEFAULT_FILTER })}>
+                Show all levels
+              </button>
+            </div>
+          )}
         </div>
-        <footer>Everything runs in your browser. Progress is saved here only.</footer>
+        <footer>Everything runs in your browser. Progress is saved in this browser only.</footer>
       </div>
     </>
   );
@@ -134,13 +170,14 @@ function Card({ level: l, progress: st }: { level: LevelSummary; progress: Level
           <Icon name="check" size={13} /> {st.best != null ? fmtTime(st.best) : 'solved'}
         </span>
       ) : st.started ? (
-        <span className="status wip">in progress</span>
+        <span className="status wip">In progress</span>
       ) : null}
       <h3>{l.title}</h3>
-      <p>{l.tagline}</p>
+      <p title={summary(l)}>{summary(l)}</p>
       <div className="meta">
         <span>{l.minutes} min</span>
-        <span>{l.bugs.length} bugs</span>
+        <span>{l.bugCount} bugs</span>
+        {REAL.test(l.tagline) && <span className="real">Real test</span>}
       </div>
     </a>
   );

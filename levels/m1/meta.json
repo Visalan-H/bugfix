@@ -2,9 +2,9 @@
   "id": "m1",
   "stack": "node",
   "difficulty": "medium",
-  "title": "Car rental: leaked cars, missing cars, lost edits",
+  "title": "Car rental",
   "minutes": 30,
-  "tagline": "Based on a real Amazon test: a car rental app that shows other people's cars, loses new cars, and forgets edits.",
+  "tagline": "Based on a real Amazon test: My Cars shows other people's cars, new cars never appear, and edits vanish.",
   "tags": [
     "auth/ownership",
     "cache invalidation",

@@ -4,7 +4,7 @@
   "difficulty": "easy",
   "title": "Warehouse low-stock report",
   "minutes": 15,
-  "tagline": "Stock numbers saved as text: '9' isn't below '10', 0 turns into 5, and totals glue together.",
+  "tagline": "The low-stock report misses items, a zero threshold shows too much, and the unit total is wrong.",
   "tags": [
     "string comparison",
     "|| vs ??",

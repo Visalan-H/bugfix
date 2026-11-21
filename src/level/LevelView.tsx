@@ -59,6 +59,8 @@ function Level({ level }: { level: LoadedLevel }) {
 
   const [files, setFiles] = useState<Files>(() => ({ ...original, ...levelProgress(id).edits }));
 
+  useEffect(() => update({ lastLevel: id }), [id]);
+
   const timer = useTimer(id, levelProgress(id).elapsed || 0);
   const { start: startTimer, isRunning: timerRunning } = timer;
 

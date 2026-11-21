@@ -2,9 +2,9 @@
   "id": "m4",
   "stack": "node",
   "difficulty": "medium",
-  "title": "Library loans: dates, limits & state",
+  "title": "Library loans",
   "minutes": 30,
-  "tagline": "Huge late fees, refunds for early returns, a loan limit that counts old loans, and books returned twice.",
+  "tagline": "Huge late fees, negative fees for on-time returns, a loan limit that never resets, and books returned twice.",
   "tags": [
     "date math",
     "state transitions",

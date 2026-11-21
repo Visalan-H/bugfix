@@ -2,9 +2,9 @@
   "id": "h3",
   "stack": "node",
   "difficulty": "hard",
-  "title": "Notifications: cursors, soft deletes & async forEach",
+  "title": "Notifications",
   "minutes": 40,
-  "tagline": "Scrolling shows duplicates, 'mark all read' half works, deleted items still count, and anyone can delete anything.",
+  "tagline": "Scrolling shows repeats, deleted items still count as unread, and 'mark all read' only half works.",
   "tags": [
     "cursor pagination",
     "async loops",

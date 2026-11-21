@@ -4,7 +4,7 @@
   "difficulty": "hard",
   "title": "Job queue workers",
   "minutes": 40,
-  "tagline": "Two workers grab the same job, the newest job runs first, anyone can finish anyone's job, and crashed jobs never restart.",
+  "tagline": "Two workers grab the same job, the newest job runs first, and any worker can finish another's job.",
   "tags": [
     "atomic claim",
     "FIFO",

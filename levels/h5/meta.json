@@ -4,7 +4,7 @@
   "difficulty": "hard",
   "title": "Cinema seat holds",
   "minutes": 45,
-  "tagline": "Two people get the same seat, failed holds keep seats locked, old holds never expire, and late confirms go through.",
+  "tagline": "Two people get the same seat, failed holds keep seats locked, and old holds never expire.",
   "tags": [
     "concurrency",
     "atomic updates",

@@ -4,7 +4,7 @@
   "difficulty": "medium",
   "title": "Bank transfers",
   "minutes": 30,
-  "tagline": "Negative transfers steal money, the wrong account is checked, and money disappears into accounts that don't exist.",
+  "tagline": "Negative transfers move money backwards, people can send from other people's accounts, and money sent to unknown accounts vanishes.",
   "tags": [
     "validation",
     "authorization",

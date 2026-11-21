@@ -4,7 +4,7 @@
   "difficulty": "hard",
   "title": "Daily analytics rollup",
   "minutes": 40,
-  "tagline": "Date keys sort wrong, empty days disappear, the last day is cut off, and the overall average is wrong.",
+  "tagline": "Days sort in the wrong order, empty days disappear, and the last day is cut off.",
   "tags": [
     "date keys",
     "gap filling",

@@ -2,9 +2,9 @@
   "id": "h2",
   "stack": "node",
   "difficulty": "hard",
-  "title": "Checkout: overselling, money & retries",
+  "title": "Checkout",
   "minutes": 45,
-  "tagline": "Overselling the last item, half-finished orders, rounding errors, and retries that charge twice.",
+  "tagline": "Totals come out wrong, failed orders still take stock, two buyers get the last item, and retries charge twice.",
   "tags": [
     "race conditions",
     "atomic updates",

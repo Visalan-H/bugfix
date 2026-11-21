@@ -20,15 +20,22 @@ export function HintsTab({ level, progress, interview }: PanelProps) {
       <p className="muted" style={{ fontSize: 13 }}>
         Each card is one bug, named by what goes wrong. Open hints one at a time. Try to need as few as you can.
       </p>
-      {level.bugs.map((bug, i) => {
-        const s = secrets.bugs[i];
+      <details className="coach">
+        <summary>Where to look in this app</summary>
+        <ul>
+          {secrets.lookFor.map((x, i) => (
+            <Inline key={i} as="li" src={x} />
+          ))}
+        </ul>
+      </details>
+      {secrets.bugs.map((s, i) => {
         const used = progress.hints[i] || 0;
         const causeShown = used > s.hints.length;
         return (
           <div className="bug" key={i}>
             <div className="bh">
               <b>BUG {i + 1}</b>
-              <span>{bug.symptom}</span>
+              <span>{s.symptom}</span>
             </div>
             {(used >= 2 || causeShown) && <div className="file">→ {s.file}</div>}
             {s.hints.slice(0, Math.min(used, s.hints.length)).map((h, k) => (
@@ -53,7 +60,7 @@ export function HintsTab({ level, progress, interview }: PanelProps) {
                   Show the answer
                 </button>
               ) : (
-                <span className="patb">{bug.pattern}</span>
+                <span className="patb">{s.pattern}</span>
               )}
             </div>
           </div>

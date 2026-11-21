@@ -39,16 +39,15 @@ export function AnswersTab({ level, progress, loadFix }: PanelProps) {
           {hintsOpened}.
         </div>
       )}
-      {level.bugs.map((bug, i) => {
-        const s = secrets.bugs[i];
+      {secrets.bugs.map((s, i) => {
         return (
           <div className="bug" key={i}>
             <div className="bh">
               <b>BUG {i + 1}</b>
-              <span>{bug.symptom}</span>
+              <span>{s.symptom}</span>
             </div>
             <div className="file">
-              → {s.file} &nbsp;<span className="patb">{bug.pattern}</span>
+              → {s.file} &nbsp;<span className="patb">{s.pattern}</span>
             </div>
             <div className="cause">
               <Inline src={s.cause} />
@@ -61,7 +60,7 @@ export function AnswersTab({ level, progress, loadFix }: PanelProps) {
       })}
       <h3>How to spot these faster</h3>
       <ul>
-        {level.lookFor.map((x, i) => (
+        {secrets.lookFor.map((x, i) => (
           <Inline key={i} as="li" src={x} />
         ))}
       </ul>

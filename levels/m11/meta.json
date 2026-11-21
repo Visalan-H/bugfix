@@ -4,7 +4,7 @@
   "difficulty": "medium",
   "title": "Storage quota",
   "minutes": 30,
-  "tagline": "Uploads go over the limit, deleting doesn't free space, and replacing a file counts it twice.",
+  "tagline": "Uploads go over the quota and deleting a file doesn't free any space.",
   "tags": [
     "quota math",
     "unsaved counters",

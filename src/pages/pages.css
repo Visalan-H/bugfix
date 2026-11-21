@@ -33,3 +33,45 @@
 .pb-sec > summary:hover h2 {
   color: var(--acc);
 }
+
+/* Home */
+.hero h1.balance {
+  text-wrap: balance;
+}
+.status.wip {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.card .meta .real {
+  margin-left: auto;
+  color: var(--acc);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 8px;
+  opacity: 0.85;
+}
+.empty {
+  padding: 30px 0;
+  color: var(--fg2);
+}
+.mode-note {
+  margin: 0 0 22px;
+}
+.linkish {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--acc);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.sec-h .mono {
+  white-space: nowrap;
+}
+.sec-h .progress {
+  flex: 1 1 60px;
+  max-width: 200px;
+  align-self: center;
+}

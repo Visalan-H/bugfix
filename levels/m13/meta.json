@@ -4,7 +4,7 @@
   "difficulty": "medium",
   "title": "Response cache layer",
   "minutes": 30,
-  "tagline": "Page 2 shows page 1, the cache never helps, prices grow 18% on every request, and new products never show.",
+  "tagline": "Page 2 shows page 1, the cache never hits, and prices grow by 18% on every request.",
   "tags": [
     "cache keys",
     "TTL units",

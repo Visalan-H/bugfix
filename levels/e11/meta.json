@@ -2,9 +2,9 @@
   "id": "e11",
   "stack": "node",
   "difficulty": "easy",
-  "title": "Comments: dates as strings",
+  "title": "Comments feed",
   "minutes": 15,
-  "tagline": "Dates saved as 'DD/MM/YYYY' text sort wrong, a filter is never read, and the count ignores the filter.",
+  "tagline": "Comments aren't newest first, the author filter is ignored, and the total is wrong.",
   "tags": [
     "date strings",
     "param names",

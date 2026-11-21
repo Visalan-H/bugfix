@@ -2,7 +2,7 @@
   "id": "e4",
   "stack": "node",
   "difficulty": "easy",
-  "title": "Signup & profile: leaks and mass assignment",
+  "title": "Signup & profile",
   "minutes": 20,
   "tagline": "Nobody can sign up, replies leak password hashes, and users can make themselves admin.",
   "tags": [

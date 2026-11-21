@@ -4,7 +4,7 @@
   "difficulty": "medium",
   "title": "Product reviews & ratings",
   "minutes": 30,
-  "tagline": "One person can review five times, deleted reviews still count, and the average comes back as text.",
+  "tagline": "One person can review twice, deleted reviews still count, and the average rating comes back as text.",
   "tags": [
     "uniqueness",
     "aggregates",

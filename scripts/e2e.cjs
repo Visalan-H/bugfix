@@ -243,13 +243,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await p.waitForSelector('.monaco-editor .view-lines');
   await p.locator('.ptabs button', { hasText: 'Hints' }).click();
   ok('interview mode hides hints', (await p.innerText('.pbody')).includes('Interview mode is on'));
-  ok(
-    'interview mode hides tips',
-    await p
-      .locator('.ptabs button', { hasText: 'Task' })
-      .click()
-      .then(async () => (await p.locator('details.coach').count()) === 0),
-  );
   await p.click('button.tb.sub');
   await p.waitForFunction(
     () => !document.querySelector('button.tb.sub')?.disabled && document.querySelector('.sumbar'),

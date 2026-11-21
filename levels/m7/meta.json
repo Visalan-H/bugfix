@@ -4,7 +4,7 @@
   "difficulty": "medium",
   "title": "Coupon engine",
   "minutes": 30,
-  "tagline": "The minimum order leaves out the minimum, percent discounts have no limit, one person's use blocks everyone, and coupons end a day early.",
+  "tagline": "A ₹300 order can't use the ₹300-minimum coupon, BIG20 takes off too much, and one person's use blocks everyone.",
   "tags": [
     "thresholds",
     "caps",

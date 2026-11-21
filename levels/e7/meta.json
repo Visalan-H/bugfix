@@ -4,7 +4,7 @@
   "difficulty": "easy",
   "title": "URL shortener",
   "minutes": 15,
-  "tagline": "Unknown links don't 404, visits are never counted, and codes are too short.",
+  "tagline": "Unknown links don't 404, redirects use the wrong status, and visits are never counted.",
   "tags": [
     "missing await",
     "unsaved counters",

@@ -4,7 +4,7 @@
   "difficulty": "hard",
   "title": "Token auth middleware",
   "minutes": 40,
-  "tagline": "The admin page is open to everyone, every token looks expired, any signature passes, and demoted admins keep their powers.",
+  "tagline": "The admin page is open to everyone, every token looks expired, and edited tokens are accepted.",
   "tags": [
     "middleware order",
     "exp in seconds",

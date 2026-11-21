@@ -36,6 +36,8 @@ export interface Filter {
 export interface AppState {
   levels: Record<string, LevelProgress>;
   interview: boolean;
+  /** The level opened most recently, for "Continue" on the home page. */
+  lastLevel?: string;
   filter?: Filter;
   hideFiles?: boolean;
   hidePanel?: boolean;

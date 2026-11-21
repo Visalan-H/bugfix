@@ -4,7 +4,7 @@
   "difficulty": "easy",
   "title": "Shopping cart totals",
   "minutes": 15,
-  "tagline": "One `=` instead of `===`, a sum with no starting value, and a 10% coupon that takes 100%.",
+  "tagline": "Adding a second item replaces the first, the subtotal breaks, and a 10% coupon takes far too much.",
   "tags": [
     "assignment in condition",
     "reduce",

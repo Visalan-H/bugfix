@@ -4,7 +4,7 @@
   "difficulty": "hard",
   "title": "CSV customer import",
   "minutes": 40,
-  "tagline": "Commas inside quotes break rows, error line numbers are wrong, '1,200' becomes 1, and duplicates get in.",
+  "tagline": "Names with commas break rows, error line numbers are off, and '1,200' imports as 1.",
   "tags": [
     "parsing",
     "line numbers",

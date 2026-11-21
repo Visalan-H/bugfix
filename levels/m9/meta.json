@@ -4,7 +4,7 @@
   "difficulty": "medium",
   "title": "Order state machine",
   "minutes": 30,
-  "tagline": "Status changes are checked backwards, no header means staff powers, and replies show the old status.",
+  "tagline": "Valid status changes are rejected, requests with no role can ship orders, and replies show the old status.",
   "tags": [
     "state machines",
     "insecure defaults",
