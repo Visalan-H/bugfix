@@ -1,39 +1,65 @@
-# bugfix
+# bug/drill
 
-Practice site for the Amazon online test **bug-fixing round**: 40 small Node/Express apps with planted bugs, tests that run in the browser, hidden tests, hints, a timer and a guide.
+**Practise the Amazon bug-fixing round before it counts.**
 
-## Run it
+Someone else's code. Failing tests. A clock. That's the round. bug/drill lets you do it 40 times first, in your browser, for free.
+
+**[Start practising at bug.visalan.me →](https://bug.visalan.me)**
+
+![bug/drill home page](docs/home.png)
+
+## What you get
+
+- **40 real-feeling apps.** Small Node/Express services with planted bugs: carts, bank transfers, rate limiters, job queues. 14 easy, 14 medium, 12 hard.
+- **Tests that run in your browser.** Edit the code, press Run, see what passes. No install, no account, no server.
+- **Hidden tests, like the real thing.** Passing the visible tests isn't enough. Submit to find out if your fix really holds.
+- **A clock.** Each level has a time limit, so you learn to work at test speed.
+- **Hints when you're stuck.** One small nudge at a time, then the answer if you want it.
+- **Interview mode.** No hints, no tips, no answers until you pass. Just you and the code.
+- **A guide that teaches the method.** A 60-minute plan, the bugs that show up again and again, and how to think about hidden tests.
+
+![A level: code, console and test results](docs/level.png)
+
+## Why
+
+The bug-fixing round isn't about writing code from scratch. It's about reading code you've never seen, finding what's wrong fast, and fixing it without breaking something else. That's a skill, and skills need practice. LeetCode doesn't train it. This does.
+
+## Your progress stays with you
+
+Solved levels, notes, code and best times are saved in your browser. Nothing is sent anywhere.
+
+## Run it yourself
 
 ```bash
 npm install
-npm run dev        # local site
-npm run build      # production build in dist/
+npm run dev
 ```
 
-## Check the levels
+Open the link it prints. Needs Node 20 or newer.
 
-Every level must fail on the buggy code and pass with the reference fix (visible and hidden tests). CI runs this on every push.
+## Add or check a level
+
+Each level is a folder in `levels/<id>/`:
+
+| File             | What it is                                     |
+| ---------------- | ---------------------------------------------- |
+| `meta.json`      | Title, time limit, the bugs, hints and answers |
+| `ticket.md`      | The task the player reads                      |
+| `repo/`          | The buggy app and its visible tests            |
+| `hidden.test.js` | Tests that run on Submit                       |
+| `solution/`      | The files the fix changes                      |
+
+Every level must fail on the buggy code and pass with the fix. CI checks this on every push.
 
 ```bash
-npm run verify            # all levels
-npm run verify -- m3 -v   # one level, every test
-npm run test:sandbox      # checks the in-browser Node sandbox itself
-npm run check:leaks       # after a build: no answer is readable in dist/
+npm run verify            # check all levels
+npm run verify -- m3 -v   # check one level, show every test
 ```
 
-## How answers are kept out of sight
+## A note on spoilers
 
-Hidden tests, fixes, hints and answer text are scrambled into a separate small file per level. The site fetches that file only when you press Submit or open Hints or Answers. So you can't find an answer by searching the site's code. This stops casual peeking, not a determined cheater. The repo itself must stay private.
+The answers are in this repo, so you can read them if you want to. The site itself keeps them out of the page until you ask, so you can't spoil a level by accident.
 
-## Layout
+## Contributing
 
-| Path                        | What it is                                                                             |
-| --------------------------- | -------------------------------------------------------------------------------------- |
-| `src/level/`, `src/editor/` | The level page: Monaco editor, tabs, split view, console, timer                        |
-| `src/panels/`               | Task, Results, Hints, Notes, Answers and the changes popup                             |
-| `src/pages/`                | Home and Guide pages                                                                   |
-| `src/runner/`               | Runs tests in a Web Worker; stops code that never finishes                             |
-| `levels/<id>/`              | One folder per level: `meta.json`, `ticket.md`, `repo/`, `hidden.test.js`, `solution/` |
-| `src/runner/sandbox/`       | The Node-like sandbox: memdb, mini Express, supertest, Jest, `require`                 |
-| `scripts/`                  | `verify-levels.ts` (level check), `check-leaks.ts`, `e2e.cjs` (browser test)           |
-| `HANDOFF.md`                | The port plan                                                                          |
+Found a bug in a bug? Have an idea for a level? Open an issue or a pull request.
